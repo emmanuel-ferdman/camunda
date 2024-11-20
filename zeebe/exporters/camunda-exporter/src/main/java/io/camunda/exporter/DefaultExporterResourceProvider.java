@@ -42,6 +42,7 @@ import io.camunda.exporter.handlers.MetricFromProcessInstanceHandler;
 import io.camunda.exporter.handlers.PostImporterQueueFromIncidentHandler;
 import io.camunda.exporter.handlers.ProcessHandler;
 import io.camunda.exporter.handlers.RoleCreateUpdateHandler;
+import io.camunda.exporter.handlers.RoleDeletedHandler;
 import io.camunda.exporter.handlers.SequenceFlowHandler;
 import io.camunda.exporter.handlers.TaskCompletedMetricHandler;
 import io.camunda.exporter.handlers.TenantCreateUpdateHandler;
@@ -76,6 +77,7 @@ import io.camunda.webapps.schema.descriptors.operate.template.SequenceFlowTempla
 import io.camunda.webapps.schema.descriptors.operate.template.VariableTemplate;
 import io.camunda.webapps.schema.descriptors.tasklist.index.FormIndex;
 import io.camunda.webapps.schema.descriptors.tasklist.index.TasklistMetricIndex;
+import io.camunda.webapps.schema.descriptors.tasklist.template.DraftTaskVariableTemplate;
 import io.camunda.webapps.schema.descriptors.tasklist.template.TaskTemplate;
 import io.camunda.webapps.schema.descriptors.usermanagement.index.AuthorizationIndex;
 import io.camunda.webapps.schema.descriptors.usermanagement.index.GroupIndex;
@@ -133,7 +135,10 @@ public class DefaultExporterResourceProvider implements ExporterResourceProvider
             entry(OperationTemplate.class, new OperationTemplate(globalPrefix, isElasticsearch)),
             entry(
                 BatchOperationTemplate.class,
-                new BatchOperationTemplate(globalPrefix, isElasticsearch)));
+                new BatchOperationTemplate(globalPrefix, isElasticsearch)),
+            entry(
+                DraftTaskVariableTemplate.class,
+                new DraftTaskVariableTemplate(globalPrefix, isElasticsearch)));
 
     indexDescriptorsMap =
         Map.ofEntries(
@@ -171,6 +176,7 @@ public class DefaultExporterResourceProvider implements ExporterResourceProvider
         Set.of(
             new RoleCreateUpdateHandler(
                 indexDescriptorsMap.get(RoleIndex.class).getFullQualifiedName()),
+            new RoleDeletedHandler(indexDescriptorsMap.get(RoleIndex.class).getFullQualifiedName()),
             new UserCreatedUpdatedHandler(
                 indexDescriptorsMap.get(UserIndex.class).getFullQualifiedName()),
             new UserDeletedHandler(indexDescriptorsMap.get(UserIndex.class).getFullQualifiedName()),

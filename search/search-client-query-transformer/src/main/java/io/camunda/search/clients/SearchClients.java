@@ -167,7 +167,7 @@ public class SearchClients
             transformers,
             new DocumentAuthorizationQueryStrategy(this),
             securityContext);
-    return executor.search(filter, FormEntity.class);
+    return executor.search(filter, io.camunda.webapps.schema.entities.tasklist.FormEntity.class);
   }
 
   @Override
@@ -202,7 +202,9 @@ public class SearchClients
             transformers,
             new DocumentAuthorizationQueryStrategy(this),
             securityContext);
-    return executor.search(filter, ProcessInstanceEntity.class);
+    return executor.search(
+        filter,
+        io.camunda.webapps.schema.entities.operate.listview.ProcessInstanceForListViewEntity.class);
   }
 
   @Override
@@ -245,7 +247,7 @@ public class SearchClients
             transformers,
             new DocumentAuthorizationQueryStrategy(this),
             securityContext);
-    return executor.search(filter, UserTaskEntity.class);
+    return executor.search(filter, io.camunda.webapps.schema.entities.tasklist.TaskEntity.class);
   }
 
   @Override
@@ -256,6 +258,6 @@ public class SearchClients
             transformers,
             new DocumentAuthorizationQueryStrategy(this),
             securityContext);
-    return executor.search(filter, VariableEntity.class);
+    return executor.search(filter, io.camunda.webapps.schema.entities.operate.VariableEntity.class);
   }
 }
