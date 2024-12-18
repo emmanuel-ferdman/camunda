@@ -7,9 +7,6 @@
  */
 package io.camunda.zeebe.engine.processing.variable;
 
-import static io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior.UNAUTHORIZED_ERROR_MESSAGE_WITH_RESOURCE;
-
-import io.camunda.zeebe.auth.impl.TenantAuthorizationCheckerImpl;
 import io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior;
 import io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior.AuthorizationRequest;
 import io.camunda.zeebe.engine.processing.streamprocessor.TypedRecordProcessor;
@@ -68,24 +65,21 @@ public final class VariableDocumentUpdateProcessor
         new AuthorizationRequest(
                 record,
                 AuthorizationResourceType.PROCESS_DEFINITION,
-                PermissionType.UPDATE_PROCESS_INSTANCE)
+                PermissionType.UPDATE_PROCESS_INSTANCE,
+                scope.getValue().getTenantId())
             .addResourceId(scope.getValue().getBpmnProcessId());
-    if (!authCheckBehavior.isAuthorized(authRequest)) {
-      final var reason =
-          UNAUTHORIZED_ERROR_MESSAGE_WITH_RESOURCE.formatted(
-              authRequest.getPermissionType(),
-              authRequest.getResourceType(),
-              "BPMN process id '%s'".formatted(scope.getValue().getBpmnProcessId()));
-      writers.rejection().appendRejection(record, RejectionType.UNAUTHORIZED, reason);
-      writers.response().writeRejectionOnCommand(record, RejectionType.UNAUTHORIZED, reason);
-      return;
-    }
-
-    if (!TenantAuthorizationCheckerImpl.fromAuthorizationMap(record.getAuthorizations())
-        .isAuthorized(scope.getValue().getTenantId())) {
-      final String reason = String.format(ERROR_MESSAGE_SCOPE_NOT_FOUND, value.getScopeKey());
-      writers.rejection().appendRejection(record, RejectionType.NOT_FOUND, reason);
-      writers.response().writeRejectionOnCommand(record, RejectionType.NOT_FOUND, reason);
+    final var isAuthorized = authCheckBehavior.isAuthorized(authRequest);
+    if (isAuthorized.isLeft()) {
+      final var rejection = isAuthorized.getLeft();
+      final String errorMessage =
+          RejectionType.NOT_FOUND.equals(rejection.type())
+              ? AuthorizationCheckBehavior.NOT_FOUND_ERROR_MESSAGE.formatted(
+                  "update variables for element",
+                  scope.getValue().getProcessInstanceKey(),
+                  "such element")
+              : rejection.reason();
+      writers.rejection().appendRejection(record, rejection.type(), errorMessage);
+      writers.response().writeRejectionOnCommand(record, rejection.type(), errorMessage);
       return;
     }
 

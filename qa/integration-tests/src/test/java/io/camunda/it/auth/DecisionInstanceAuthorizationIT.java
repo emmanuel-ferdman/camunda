@@ -7,24 +7,24 @@
  */
 package io.camunda.it.auth;
 
-import static io.camunda.zeebe.client.protocol.rest.PermissionTypeEnum.CREATE;
-import static io.camunda.zeebe.client.protocol.rest.PermissionTypeEnum.CREATE_DECISION_INSTANCE;
-import static io.camunda.zeebe.client.protocol.rest.PermissionTypeEnum.READ_PROCESS_INSTANCE;
-import static io.camunda.zeebe.client.protocol.rest.ResourceTypeEnum.DECISION_DEFINITION;
-import static io.camunda.zeebe.client.protocol.rest.ResourceTypeEnum.DEPLOYMENT;
+import static io.camunda.client.protocol.rest.PermissionTypeEnum.CREATE;
+import static io.camunda.client.protocol.rest.PermissionTypeEnum.CREATE_DECISION_INSTANCE;
+import static io.camunda.client.protocol.rest.PermissionTypeEnum.READ_DECISION_INSTANCE;
+import static io.camunda.client.protocol.rest.ResourceTypeEnum.DECISION_DEFINITION;
+import static io.camunda.client.protocol.rest.ResourceTypeEnum.DEPLOYMENT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.camunda.application.Profile;
-import io.camunda.it.utils.BrokerWithCamundaExporterITInvocationProvider;
+import io.camunda.client.ZeebeClient;
+import io.camunda.client.api.command.ProblemException;
+import io.camunda.client.api.response.DeploymentEvent;
+import io.camunda.client.api.response.EvaluateDecisionResponse;
+import io.camunda.client.api.search.response.DecisionInstance;
+import io.camunda.it.utils.BrokerITInvocationProvider;
 import io.camunda.it.utils.ZeebeClientTestFactory.Authenticated;
 import io.camunda.it.utils.ZeebeClientTestFactory.Permissions;
 import io.camunda.it.utils.ZeebeClientTestFactory.User;
-import io.camunda.zeebe.client.ZeebeClient;
-import io.camunda.zeebe.client.api.command.ProblemException;
-import io.camunda.zeebe.client.api.response.DeploymentEvent;
-import io.camunda.zeebe.client.api.response.EvaluateDecisionResponse;
-import io.camunda.zeebe.client.api.search.response.DecisionInstance;
 import java.time.Duration;
 import java.util.List;
 import org.awaitility.Awaitility;
@@ -49,18 +49,19 @@ class DecisionInstanceAuthorizationIT {
           List.of(
               new Permissions(DEPLOYMENT, CREATE, List.of("*")),
               new Permissions(DECISION_DEFINITION, CREATE_DECISION_INSTANCE, List.of("*")),
-              new Permissions(DECISION_DEFINITION, READ_PROCESS_INSTANCE, List.of("*"))));
+              new Permissions(DECISION_DEFINITION, READ_DECISION_INSTANCE, List.of("*"))));
   private static final User RESTRICTED_USER =
       new User(
           RESTRICTED,
           "password",
           List.of(
               new Permissions(
-                  DECISION_DEFINITION, READ_PROCESS_INSTANCE, List.of(DECISION_DEFINITION_ID_1))));
+                  DECISION_DEFINITION, READ_DECISION_INSTANCE, List.of(DECISION_DEFINITION_ID_1))));
 
   @RegisterExtension
-  static final BrokerWithCamundaExporterITInvocationProvider PROVIDER =
-      new BrokerWithCamundaExporterITInvocationProvider()
+  static final BrokerITInvocationProvider PROVIDER =
+      new BrokerITInvocationProvider()
+          .withoutRdbmsExporter()
           .withAdditionalProfiles(Profile.AUTH_BASIC)
           .withAuthorizationsEnabled()
           .withUsers(ADMIN_USER, RESTRICTED_USER);
@@ -111,7 +112,7 @@ class DecisionInstanceAuthorizationIT {
     assertThat(problemException.code()).isEqualTo(403);
     assertThat(problemException.details().getDetail())
         .isEqualTo(
-            "Unauthorized to perform operation 'READ_PROCESS_INSTANCE' on resource 'DECISION_DEFINITION'");
+            "Unauthorized to perform operation 'READ_DECISION_INSTANCE' on resource 'DECISION_DEFINITION'");
   }
 
   @TestTemplate

@@ -9,7 +9,6 @@ package io.camunda.zeebe.gateway;
 
 import static io.camunda.zeebe.util.buffer.BufferUtil.wrapString;
 
-import io.camunda.zeebe.gateway.cmd.IllegalTenantRequestException;
 import io.camunda.zeebe.gateway.cmd.InvalidTenantRequestException;
 import io.camunda.zeebe.gateway.impl.broker.request.BrokerActivateJobsRequest;
 import io.camunda.zeebe.gateway.impl.broker.request.BrokerBroadcastSignalRequest;
@@ -29,7 +28,7 @@ import io.camunda.zeebe.gateway.impl.broker.request.BrokerSetVariablesRequest;
 import io.camunda.zeebe.gateway.impl.broker.request.BrokerThrowErrorRequest;
 import io.camunda.zeebe.gateway.impl.broker.request.BrokerUpdateJobRetriesRequest;
 import io.camunda.zeebe.gateway.impl.broker.request.BrokerUpdateJobTimeoutRequest;
-import io.camunda.zeebe.gateway.interceptors.InterceptorUtil;
+import io.camunda.zeebe.gateway.protocol.GatewayOuterClass;
 import io.camunda.zeebe.gateway.protocol.GatewayOuterClass.ActivateJobsRequest;
 import io.camunda.zeebe.gateway.protocol.GatewayOuterClass.BroadcastSignalRequest;
 import io.camunda.zeebe.gateway.protocol.GatewayOuterClass.CancelProcessInstanceRequest;
@@ -54,10 +53,12 @@ import io.camunda.zeebe.gateway.protocol.GatewayOuterClass.UpdateJobRetriesReque
 import io.camunda.zeebe.gateway.protocol.GatewayOuterClass.UpdateJobTimeoutRequest;
 import io.camunda.zeebe.msgpack.value.StringValue;
 import io.camunda.zeebe.protocol.impl.record.value.job.JobResult;
+import io.camunda.zeebe.protocol.impl.record.value.job.JobResultCorrections;
+import io.camunda.zeebe.protocol.impl.record.value.usertask.UserTaskRecord;
 import io.camunda.zeebe.protocol.impl.stream.job.JobActivationProperties;
 import io.camunda.zeebe.protocol.impl.stream.job.JobActivationPropertiesImpl;
 import io.camunda.zeebe.protocol.record.value.TenantOwned;
-import io.grpc.Context;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 import org.agrona.DirectBuffer;
@@ -166,7 +167,46 @@ public final class RequestMapper extends RequestUtil {
     if (!request.hasResult()) {
       return null;
     }
-    return new JobResult().setDenied(request.getResult().getDenied());
+
+    if (!request.getResult().hasCorrections()) {
+      return new JobResult().setDenied(request.getResult().getDenied());
+    }
+
+    final JobResultCorrections corrections = new JobResultCorrections();
+    final List<String> correctedAttributes = new ArrayList<>();
+
+    final GatewayOuterClass.JobResultCorrections requestCorrections =
+        request.getResult().getCorrections();
+
+    if (requestCorrections.hasAssignee()) {
+      corrections.setAssignee(requestCorrections.getAssignee());
+      correctedAttributes.add(UserTaskRecord.ASSIGNEE);
+    }
+    if (requestCorrections.hasDueDate()) {
+      corrections.setDueDate(requestCorrections.getDueDate());
+      correctedAttributes.add(UserTaskRecord.DUE_DATE);
+    }
+    if (requestCorrections.hasFollowUpDate()) {
+      corrections.setFollowUpDate(requestCorrections.getFollowUpDate());
+      correctedAttributes.add(UserTaskRecord.FOLLOW_UP_DATE);
+    }
+    if (requestCorrections.hasCandidateUsers()) {
+      corrections.setCandidateUsersList(requestCorrections.getCandidateUsers().getValuesList());
+      correctedAttributes.add(UserTaskRecord.CANDIDATE_USERS);
+    }
+    if (requestCorrections.hasCandidateGroups()) {
+      corrections.setCandidateGroupsList(requestCorrections.getCandidateGroups().getValuesList());
+      correctedAttributes.add(UserTaskRecord.CANDIDATE_GROUPS);
+    }
+    if (requestCorrections.hasPriority()) {
+      corrections.setPriority(requestCorrections.getPriority());
+      correctedAttributes.add(UserTaskRecord.PRIORITY);
+    }
+
+    return new JobResult()
+        .setDenied(request.getResult().getDenied())
+        .setCorrections(corrections)
+        .setCorrectedAttributes(correctedAttributes);
   }
 
   public static BrokerCreateProcessInstanceRequest toCreateProcessInstanceRequest(
@@ -363,22 +403,6 @@ public final class RequestMapper extends RequestUtil {
         && !TENANT_ID_MASK.matcher(tenantId).matches()) {
       throw new InvalidTenantRequestException(
           commandName, tenantId, "tenant identifier contains illegal characters");
-    }
-
-    final List<String> authorizedTenants;
-    try {
-      authorizedTenants = Context.current().call(InterceptorUtil.getAuthorizedTenantsKey()::get);
-    } catch (final Exception e) {
-      throw new InvalidTenantRequestException(
-          commandName, tenantId, "tenant could not be retrieved from the request context", e);
-    }
-    if (authorizedTenants == null) {
-      throw new InvalidTenantRequestException(
-          commandName, tenantId, "tenant could not be retrieved from the request context");
-    }
-    if (!authorizedTenants.contains(tenantId)) {
-      throw new IllegalTenantRequestException(
-          commandName, tenantId, "tenant is not authorized to perform this request");
     }
 
     return tenantId;

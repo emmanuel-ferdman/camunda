@@ -12,26 +12,33 @@ import static io.camunda.zeebe.protocol.record.ValueType.DECISION;
 import static io.camunda.zeebe.protocol.record.ValueType.DECISION_EVALUATION;
 import static io.camunda.zeebe.protocol.record.ValueType.DECISION_REQUIREMENTS;
 import static io.camunda.zeebe.protocol.record.ValueType.FORM;
+import static io.camunda.zeebe.protocol.record.ValueType.GROUP;
 import static io.camunda.zeebe.protocol.record.ValueType.INCIDENT;
 import static io.camunda.zeebe.protocol.record.ValueType.JOB;
+import static io.camunda.zeebe.protocol.record.ValueType.MAPPING;
 import static io.camunda.zeebe.protocol.record.ValueType.PROCESS;
 import static io.camunda.zeebe.protocol.record.ValueType.PROCESS_INSTANCE;
+import static io.camunda.zeebe.protocol.record.ValueType.PROCESS_MESSAGE_SUBSCRIPTION;
 import static io.camunda.zeebe.protocol.record.ValueType.ROLE;
 import static io.camunda.zeebe.protocol.record.ValueType.TENANT;
 import static io.camunda.zeebe.protocol.record.ValueType.USER;
 import static io.camunda.zeebe.protocol.record.ValueType.USER_TASK;
 import static io.camunda.zeebe.protocol.record.ValueType.VARIABLE;
+import static io.camunda.zeebe.protocol.record.ValueType.VARIABLE_DOCUMENT;
 
-import co.elastic.clients.util.VisibleForTesting;
 import io.camunda.exporter.adapters.ClientAdapter;
 import io.camunda.exporter.config.ConfigValidator;
 import io.camunda.exporter.config.ExporterConfiguration;
 import io.camunda.exporter.exceptions.PersistenceException;
 import io.camunda.exporter.metrics.CamundaExporterMetrics;
 import io.camunda.exporter.schema.SchemaManager;
+import io.camunda.exporter.schema.SearchEngineClient;
 import io.camunda.exporter.store.BatchRequest;
 import io.camunda.exporter.store.ExporterBatchWriter;
 import io.camunda.exporter.tasks.BackgroundTaskManager;
+import io.camunda.exporter.tasks.BackgroundTaskManagerFactory;
+import io.camunda.webapps.schema.descriptors.operate.index.ImportPositionIndex;
+import io.camunda.webapps.schema.descriptors.tasklist.index.TasklistImportPositionIndex;
 import io.camunda.zeebe.exporter.api.Exporter;
 import io.camunda.zeebe.exporter.api.ExporterException;
 import io.camunda.zeebe.exporter.api.context.Context;
@@ -40,6 +47,8 @@ import io.camunda.zeebe.exporter.api.context.Controller;
 import io.camunda.zeebe.protocol.record.Record;
 import io.camunda.zeebe.protocol.record.RecordType;
 import io.camunda.zeebe.protocol.record.ValueType;
+import io.camunda.zeebe.util.SemanticVersion;
+import io.camunda.zeebe.util.VisibleForTesting;
 import java.time.Duration;
 import java.util.Set;
 import org.agrona.CloseHelper;
@@ -56,8 +65,11 @@ public class CamundaExporter implements Exporter {
   private long lastPosition = -1;
   private final ExporterResourceProvider provider;
   private CamundaExporterMetrics metrics;
-  private Logger logger;
   private BackgroundTaskManager taskManager;
+  private final ExporterMetadata metadata;
+  private boolean importersCompleted = false;
+  private SearchEngineClient searchEngineClient;
+  private int partitionId;
 
   public CamundaExporter() {
     this(new DefaultExporterResourceProvider());
@@ -65,35 +77,43 @@ public class CamundaExporter implements Exporter {
 
   @VisibleForTesting
   public CamundaExporter(final ExporterResourceProvider provider) {
+    this(provider, new ExporterMetadata());
+  }
+
+  @VisibleForTesting
+  public CamundaExporter(final ExporterResourceProvider provider, final ExporterMetadata metadata) {
     this.provider = provider;
+    this.metadata = metadata;
   }
 
   @Override
   public void configure(final Context context) {
-    logger = context.getLogger();
     configuration = context.getConfiguration().instantiate(ExporterConfiguration.class);
     ConfigValidator.validate(configuration);
     context.setFilter(new CamundaExporterRecordFilter());
     metrics = new CamundaExporterMetrics(context.getMeterRegistry());
     clientAdapter = ClientAdapter.of(configuration);
+    partitionId = context.getPartitionId();
     provider.init(
         configuration, clientAdapter.getExporterEntityCacheProvider(), context.getMeterRegistry());
 
     taskManager =
-        BackgroundTaskManager.create(
-            context.getPartitionId(),
-            context.getConfiguration().getId().toLowerCase(),
-            configuration,
-            provider,
-            metrics,
-            logger);
+        new BackgroundTaskManagerFactory(
+                context.getPartitionId(),
+                context.getConfiguration().getId().toLowerCase(),
+                configuration,
+                provider,
+                metrics,
+                context.getLogger(),
+                metadata)
+            .build();
     LOG.debug("Exporter configured with {}", configuration);
   }
 
   @Override
   public void open(final Controller controller) {
     this.controller = controller;
-    final var searchEngineClient = clientAdapter.getSearchEngineClient();
+    searchEngineClient = clientAdapter.getSearchEngineClient();
     final var schemaManager =
         new SchemaManager(
             searchEngineClient,
@@ -105,12 +125,9 @@ public class CamundaExporter implements Exporter {
 
     writer = createBatchWriter();
 
-    scheduleDelayedFlush();
-
-    // // start archiver after the schema has been created to avoid transient errors
-    if (configuration.getArchiver().isRolloverEnabled()) {
-      taskManager.start();
-    }
+    checkImportersCompletedAndReschedule();
+    controller.readMetadata().ifPresent(metadata::deserialize);
+    taskManager.start();
 
     LOG.info("Exporter opened");
   }
@@ -120,7 +137,7 @@ public class CamundaExporter implements Exporter {
     if (writer != null) {
       try {
         flush();
-        updateLastExportedPosition();
+        updateLastExportedPosition(lastPosition);
       } catch (final Exception e) {
         LOG.warn("Failed to flush records before closing exporter.", e);
       }
@@ -140,11 +157,36 @@ public class CamundaExporter implements Exporter {
 
   @Override
   public void export(final Record<?> record) {
+
+    final var recordVersion = getVersion(record.getBrokerVersion());
+
+    if (recordVersion.major() == 8 && recordVersion.minor() < 7) {
+      LOG.debug(
+          "Skip record with broker version '{}'. Last exported position will be updated to '{}'",
+          record.getBrokerVersion(),
+          record.getPosition());
+      updateLastExportedPosition(record.getPosition());
+      return;
+    }
+
+    if (configuration.getIndex().shouldWaitForImporters() && !importersCompleted) {
+      ensureCachedRecordsLessThanBulkSize(record);
+
+      writer.addRecord(record);
+
+      LOG.info(
+          "Waiting for importers to finish, cached record with key {} but did not flush",
+          record.getKey());
+      return;
+    }
+
     if (writer.getBatchSize() == 0) {
       metrics.startFlushLatencyMeasurement();
     }
 
+    // adding record is idempotent
     writer.addRecord(record);
+
     lastPosition = record.getPosition();
 
     if (shouldFlush()) {
@@ -157,8 +199,31 @@ public class CamundaExporter implements Exporter {
       }
       // Update the record counters only after the flush was successful. If the synchronous flush
       // fails then the exporter will be invoked with the same record again.
-      updateLastExportedPosition();
+      updateLastExportedPosition(lastPosition);
     }
+  }
+
+  private void ensureCachedRecordsLessThanBulkSize(final Record<?> record) {
+    final var maxCachedRecords = configuration.getBulk().getSize();
+
+    if (writer.getBatchSize() >= maxCachedRecords) {
+      final var warnMsg =
+          String.format(
+              "Reached the max bulk size amount of cached records [%d] while waiting for importers to finish, retrying export for record at position [%s]",
+              maxCachedRecords, record.getPosition());
+      LOG.warn(warnMsg);
+      throw new IllegalStateException(warnMsg);
+    }
+  }
+
+  private SemanticVersion getVersion(final String version) {
+    return SemanticVersion.parse(version)
+        .orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    "Unsupported record broker version: ["
+                        + version
+                        + "] Must be a semantic version."));
   }
 
   private boolean shouldFlush() {
@@ -179,11 +244,38 @@ public class CamundaExporter implements Exporter {
   private void flushAndReschedule() {
     try {
       flush();
-      updateLastExportedPosition();
+      updateLastExportedPosition(lastPosition);
     } catch (final Exception e) {
       LOG.warn("Unexpected exception occurred on periodically flushing bulk, will retry later.", e);
     }
     scheduleDelayedFlush();
+  }
+
+  private void scheduleImportersCompletedCheck() {
+    controller.scheduleCancellableTask(
+        Duration.ofSeconds(10), this::checkImportersCompletedAndReschedule);
+  }
+
+  private void checkImportersCompletedAndReschedule() {
+    if (!importersCompleted) {
+      scheduleImportersCompletedCheck();
+    }
+    try {
+      final var importPositionIndices =
+          provider.getIndexDescriptors().stream()
+              .filter(
+                  d -> d instanceof ImportPositionIndex || d instanceof TasklistImportPositionIndex)
+              .toList();
+
+      importersCompleted =
+          searchEngineClient.importersCompleted(partitionId, importPositionIndices);
+    } catch (final Exception e) {
+      LOG.warn("Unexpected exception occurred checking importers completed, will retry later.", e);
+    }
+
+    if (importersCompleted) {
+      scheduleDelayedFlush();
+    }
   }
 
   private void flush() {
@@ -197,14 +289,17 @@ public class CamundaExporter implements Exporter {
     }
   }
 
-  private void updateLastExportedPosition() {
-    controller.updateLastExportedRecordPosition(lastPosition);
+  private void updateLastExportedPosition(final long lastPosition) {
+    final var serialized = metadata.serialize();
+    controller.updateLastExportedRecordPosition(lastPosition, serialized);
   }
 
   private record CamundaExporterRecordFilter() implements RecordFilter {
     private static final Set<ValueType> VALUE_TYPES_2_EXPORT =
         Set.of(
             USER,
+            GROUP,
+            MAPPING,
             AUTHORIZATION,
             TENANT,
             DECISION,
@@ -212,6 +307,8 @@ public class CamundaExporter implements Exporter {
             PROCESS_INSTANCE,
             ROLE,
             VARIABLE,
+            VARIABLE_DOCUMENT,
+            PROCESS_MESSAGE_SUBSCRIPTION,
             JOB,
             INCIDENT,
             DECISION_EVALUATION,

@@ -11,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.camunda.search.clients.MappingSearchClient;
@@ -22,18 +23,24 @@ import io.camunda.search.query.SearchQueryResult;
 import io.camunda.security.auth.Authentication;
 import io.camunda.service.MappingServices.MappingDTO;
 import io.camunda.service.security.SecurityContextProvider;
+import io.camunda.zeebe.broker.client.api.BrokerClient;
+import io.camunda.zeebe.broker.client.api.dto.BrokerResponse;
 import io.camunda.zeebe.gateway.api.util.StubbedBrokerClient;
 import io.camunda.zeebe.gateway.impl.broker.request.BrokerMappingCreateRequest;
+import io.camunda.zeebe.gateway.impl.broker.request.BrokerMappingDeleteRequest;
 import io.camunda.zeebe.protocol.impl.record.value.authorization.MappingRecord;
 import io.camunda.zeebe.protocol.record.ValueType;
 import io.camunda.zeebe.protocol.record.intent.MappingIntent;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import org.assertj.core.util.Arrays;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 public class MappingServicesTest {
 
+  ArgumentCaptor<BrokerMappingDeleteRequest> mappingDeleteRequestArgumentCaptor;
   private MappingServices services;
   private MappingSearchClient client;
   private Authentication authentication;
@@ -45,6 +52,7 @@ public class MappingServicesTest {
     stubbedBrokerClient = new StubbedBrokerClient();
     client = mock(MappingSearchClient.class);
     when(client.withSecurityContext(any())).thenReturn(client);
+    mappingDeleteRequestArgumentCaptor = ArgumentCaptor.forClass(BrokerMappingDeleteRequest.class);
     services =
         new MappingServices(
             stubbedBrokerClient, mock(SecurityContextProvider.class), client, authentication);
@@ -53,7 +61,7 @@ public class MappingServicesTest {
   @Test
   public void shouldCreateMapping() {
     // given
-    final var mappingDTO = new MappingDTO(100L, "newClaimName", "newClaimValue");
+    final var mappingDTO = new MappingDTO("newClaimName", "newClaimValue", "mappingRuleName");
 
     // when
     services.createMapping(mappingDTO);
@@ -65,6 +73,7 @@ public class MappingServicesTest {
     final MappingRecord brokerRequestValue = request.getRequestWriter();
     assertThat(brokerRequestValue.getClaimName()).isEqualTo(mappingDTO.claimName());
     assertThat(brokerRequestValue.getClaimValue()).isEqualTo(mappingDTO.claimValue());
+    assertThat(brokerRequestValue.getName()).isEqualTo(mappingDTO.name());
   }
 
   @Test
@@ -87,7 +96,7 @@ public class MappingServicesTest {
   public void shouldReturnSingleVariable() {
     // given
     final var entity = mock(MappingEntity.class);
-    final var result = new SearchQueryResult<>(1, List.of(entity), Arrays.array());
+    final var result = new SearchQueryResult<>(1, List.of(entity), Arrays.array(), Arrays.array());
     when(client.searchMappings(any())).thenReturn(result);
   }
 
@@ -95,7 +104,7 @@ public class MappingServicesTest {
   public void shouldReturnSingleVariableForFind() {
     // given
     final var entity = mock(MappingEntity.class);
-    final var result = new SearchQueryResult<>(1, List.of(entity), Arrays.array());
+    final var result = new SearchQueryResult<>(1, List.of(entity), Arrays.array(), Arrays.array());
     when(client.searchMappings(any())).thenReturn(result);
 
     // when
@@ -109,7 +118,7 @@ public class MappingServicesTest {
   public void shouldReturnEmptyWhenNotFoundByFind() {
     // given
     final var key = 100L;
-    when(client.searchMappings(any())).thenReturn(new SearchQueryResult(0, List.of(), null));
+    when(client.searchMappings(any())).thenReturn(new SearchQueryResult(0, List.of(), null, null));
 
     // when / then
     assertThat(services.findMapping(key)).isEmpty();
@@ -118,9 +127,33 @@ public class MappingServicesTest {
   @Test
   public void shouldThrowExceptionWhenNotFoundByGet() {
     // given
-    when(client.searchMappings(any())).thenReturn(new SearchQueryResult(0, List.of(), null));
+    when(client.searchMappings(any())).thenReturn(new SearchQueryResult(0, List.of(), null, null));
 
     // when / then
     assertThrows(NotFoundException.class, () -> services.getMapping(1L));
+  }
+
+  @Test
+  public void shouldTriggerDeleteRequest() {
+    // given
+    final Authentication testAuthentication = mock(Authentication.class);
+    when(testAuthentication.token()).thenReturn("token");
+    final BrokerClient mockBrokerClient = mock(BrokerClient.class);
+    final MappingServices testMappingServices =
+        new MappingServices(
+            mockBrokerClient, mock(SecurityContextProvider.class), client, testAuthentication);
+
+    final var mappingRecord = new MappingRecord();
+    mappingRecord.setMappingKey(1234L);
+    when(mockBrokerClient.sendRequest(any()))
+        .thenReturn(CompletableFuture.completedFuture(new BrokerResponse<>(mappingRecord)));
+
+    //  when
+    testMappingServices.deleteMapping(1234L);
+
+    // then
+    verify(mockBrokerClient).sendRequest(mappingDeleteRequestArgumentCaptor.capture());
+    final var request = mappingDeleteRequestArgumentCaptor.getValue();
+    assertThat(request.getRequestWriter().getMappingKey()).isEqualTo(1234L);
   }
 }

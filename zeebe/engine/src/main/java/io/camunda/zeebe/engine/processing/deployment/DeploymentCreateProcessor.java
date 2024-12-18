@@ -7,7 +7,6 @@
  */
 package io.camunda.zeebe.engine.processing.deployment;
 
-import static io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior.UNAUTHORIZED_ERROR_MESSAGE;
 import static io.camunda.zeebe.engine.state.instance.TimerInstance.NO_ELEMENT_INSTANCE;
 import static io.camunda.zeebe.util.buffer.BufferUtil.wrapArray;
 import static java.util.function.Predicate.not;
@@ -126,13 +125,20 @@ public final class DeploymentCreateProcessor
   public void processNewCommand(final TypedRecord<DeploymentRecord> command) {
     final var authorizationRequest =
         new AuthorizationRequest(
-            command, AuthorizationResourceType.DEPLOYMENT, PermissionType.CREATE);
-    if (!authCheckBehavior.isAuthorized(authorizationRequest)) {
-      final var errorMessage =
-          UNAUTHORIZED_ERROR_MESSAGE.formatted(
-              authorizationRequest.getPermissionType(), authorizationRequest.getResourceType());
-      rejectionWriter.appendRejection(command, RejectionType.UNAUTHORIZED, errorMessage);
-      responseWriter.writeRejectionOnCommand(command, RejectionType.UNAUTHORIZED, errorMessage);
+            command,
+            AuthorizationResourceType.DEPLOYMENT,
+            PermissionType.CREATE,
+            command.getValue().getTenantId());
+    final var isAuthorized = authCheckBehavior.isAuthorized(authorizationRequest);
+    if (isAuthorized.isLeft()) {
+      final var rejection = isAuthorized.getLeft();
+      final String errorMessage =
+          RejectionType.NOT_FOUND.equals(rejection.type())
+              ? "Expected to create a deployment for tenant '%s', but no such tenant was found"
+                  .formatted(command.getValue().getTenantId())
+              : rejection.reason();
+      rejectionWriter.appendRejection(command, rejection.type(), errorMessage);
+      responseWriter.writeRejectionOnCommand(command, rejection.type(), errorMessage);
       return;
     }
 
@@ -267,7 +273,9 @@ public final class DeploymentCreateProcessor
         .forEach(
             metadata -> {
               for (final DeploymentResource resource : deploymentEvent.getResources()) {
-                if (resource.getResourceName().equals(metadata.getResourceName())) {
+                final var resourceChecksum =
+                    deploymentTransformer.getChecksum(resource.getResource());
+                if (resourceChecksum.equals(metadata.getChecksumBuffer())) {
                   stateWriter.appendFollowUpEvent(
                       metadata.getFormKey(),
                       FormIntent.CREATED,

@@ -9,11 +9,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"syscall"
 )
 
-func (w *UnixC8Run) OpenBrowser() error {
-	operateUrl := "http://localhost:8080/operate/login"
+func (w *UnixC8Run) OpenBrowser(protocol string, port int) error {
+	operateUrl := protocol + "://localhost:" + strconv.Itoa(port) + "/operate/login"
 	var openBrowserCmdString string
 	if runtime.GOOS == "darwin" {
 		openBrowserCmdString = "open"
@@ -50,7 +51,7 @@ func (w *UnixC8Run) ElasticsearchCmd(elasticsearchVersion string, parentDir stri
 }
 
 func (w *UnixC8Run) ConnectorsCmd(javaBinary string, parentDir string, camundaVersion string) *exec.Cmd {
-	classPath := parentDir + "/*:" + parentDir + "/custom_connectors/*:" + parentDir + "/camunda-zeebe-" + camundaVersion + "/lib/*"
+	classPath := parentDir + "/*:" + parentDir + "/custom_connectors/*"
 	mainClass := "io.camunda.connector.runtime.app.ConnectorRuntimeApplication"
 	springConfigLocation := "--spring.config.location=" + parentDir + "/connectors-application.properties"
 	connectorsCmd := exec.Command(javaBinary, "-cp", classPath, mainClass, springConfigLocation)
@@ -58,9 +59,12 @@ func (w *UnixC8Run) ConnectorsCmd(javaBinary string, parentDir string, camundaVe
 	return connectorsCmd
 }
 
-func (w *UnixC8Run) CamundaCmd(camundaVersion string, parentDir string, extraArgs string) *exec.Cmd {
+func (w *UnixC8Run) CamundaCmd(camundaVersion string, parentDir string, extraArgs string, javaOpts string) *exec.Cmd {
 	camundaCmdString := parentDir + "/camunda-zeebe-" + camundaVersion + "/bin/camunda"
 	camundaCmd := exec.Command(camundaCmdString, extraArgs)
+	if javaOpts != "" {
+		camundaCmd.Env = append(os.Environ(), "JAVA_OPTS="+javaOpts)
+	}
 	camundaCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return camundaCmd
 }

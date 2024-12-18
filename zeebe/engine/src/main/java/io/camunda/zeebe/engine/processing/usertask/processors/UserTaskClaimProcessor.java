@@ -7,6 +7,7 @@
  */
 package io.camunda.zeebe.engine.processing.usertask.processors;
 
+import io.camunda.zeebe.engine.processing.Rejection;
 import io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior;
 import io.camunda.zeebe.engine.processing.streamprocessor.writers.StateWriter;
 import io.camunda.zeebe.engine.processing.streamprocessor.writers.TypedResponseWriter;
@@ -20,7 +21,6 @@ import io.camunda.zeebe.protocol.record.ValueType;
 import io.camunda.zeebe.protocol.record.intent.UserTaskIntent;
 import io.camunda.zeebe.stream.api.records.TypedRecord;
 import io.camunda.zeebe.util.Either;
-import io.camunda.zeebe.util.collection.Tuple;
 import java.util.List;
 
 public final class UserTaskClaimProcessor implements UserTaskCommandProcessor {
@@ -54,7 +54,7 @@ public final class UserTaskClaimProcessor implements UserTaskCommandProcessor {
   }
 
   @Override
-  public Either<Tuple<RejectionType, String>, UserTaskRecord> validateCommand(
+  public Either<Rejection, UserTaskRecord> validateCommand(
       final TypedRecord<UserTaskRecord> command) {
     return preconditionChecker.check(command);
   }
@@ -67,24 +67,9 @@ public final class UserTaskClaimProcessor implements UserTaskCommandProcessor {
     userTaskRecord.setAssignee(command.getValue().getAssignee());
     userTaskRecord.setAction(command.getValue().getActionOrDefault(DEFAULT_ACTION));
 
-    stateWriter.appendFollowUpEvent(userTaskKey, UserTaskIntent.ASSIGNING, userTaskRecord);
+    stateWriter.appendFollowUpEvent(userTaskKey, UserTaskIntent.CLAIMING, userTaskRecord);
   }
 
-  /// {@inheritDoc}
-  ///
-  /// @apiNote This method finalizes the [UserTaskIntent#CLAIM] command only when there are no
-  /// `assignment` listeners for the user task. If `assignment` listeners are defined,
-  /// [UserTaskAssignProcessor#onFinalizeCommand(TypedRecord, UserTaskRecord)] method will handle
-  /// this logic instead.
-  ///
-  /// This occurs because both `CLAIM` and `ASSIGN` commands transition the user task to the
-  /// `ASSIGNING` lifecycle state, making it indistinguishable which command initially led to this
-  /// state. Therefore, [UserTaskAssignProcessor] is selected to finalize the command after all task
-  /// listeners are processed when the user task is in the [LifecycleState#ASSIGNING] state.
-  ///
-  /// This approach is acceptable as long as `CLAIM` and `ASSIGN` commands share identical
-  /// finalization logic. Any need for distinct handling would require a further update to this
-  /// behavior.
   @Override
   public void onFinalizeCommand(
       final TypedRecord<UserTaskRecord> command, final UserTaskRecord userTaskRecord) {
@@ -113,14 +98,14 @@ public final class UserTaskClaimProcessor implements UserTaskCommandProcessor {
     }
   }
 
-  private static Either<Tuple<RejectionType, String>, UserTaskRecord> checkClaim(
+  private static Either<Rejection, UserTaskRecord> checkClaim(
       final TypedRecord<UserTaskRecord> command, final UserTaskRecord userTaskRecord) {
 
     final long userTaskKey = command.getKey();
     final String newAssignee = command.getValue().getAssignee();
     if (newAssignee.isBlank()) {
       return Either.left(
-          Tuple.of(
+          new Rejection(
               RejectionType.INVALID_STATE,
               String.format(INVALID_USER_TASK_EMPTY_ASSIGNEE_MESSAGE, userTaskKey)));
     }
@@ -129,7 +114,7 @@ public final class UserTaskClaimProcessor implements UserTaskCommandProcessor {
     final boolean canClaim = currentAssignee.isBlank() || currentAssignee.equals(newAssignee);
     if (!canClaim) {
       return Either.left(
-          Tuple.of(
+          new Rejection(
               RejectionType.INVALID_STATE,
               String.format(INVALID_USER_TASK_ASSIGNEE_MESSAGE, userTaskKey)));
     }

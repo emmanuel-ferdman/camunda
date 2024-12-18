@@ -45,7 +45,8 @@ public class JobUpdateBehaviour {
 
   public Either<Rejection, JobRecord> getJob(
       final long jobKey, final TypedRecord<JobRecord> command) {
-    final var job = jobState.getJob(jobKey, command.getAuthorizations());
+    final var authorizedTenantIds = authCheckBehavior.getAuthorizedTenantIds(command);
+    final var job = jobState.getJob(jobKey, authorizedTenantIds);
 
     if (job != null) {
       return Either.right(job);
@@ -62,17 +63,7 @@ public class JobUpdateBehaviour {
                 AuthorizationResourceType.PROCESS_DEFINITION,
                 PermissionType.UPDATE_PROCESS_INSTANCE)
             .addResourceId(job.getBpmnProcessId());
-
-    if (!authCheckBehavior.isAuthorized(authRequest)) {
-      return Either.left(
-          new Rejection(
-              RejectionType.UNAUTHORIZED,
-              AuthorizationCheckBehavior.UNAUTHORIZED_ERROR_MESSAGE_WITH_RESOURCE.formatted(
-                  authRequest.getPermissionType(),
-                  authRequest.getResourceType(),
-                  "BPMN process id '%s'".formatted(job.getBpmnProcessId()))));
-    }
-    return Either.right(job);
+    return authCheckBehavior.isAuthorized(authRequest).map(unused -> job);
   }
 
   public Optional<String> updateJobRetries(

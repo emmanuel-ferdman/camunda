@@ -9,11 +9,11 @@ package io.camunda.it.exporter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.camunda.it.utils.BrokerWithCamundaExporterITInvocationProvider;
-import io.camunda.zeebe.client.ZeebeClient;
-import io.camunda.zeebe.client.api.search.filter.UserTaskFilter;
-import io.camunda.zeebe.client.api.search.response.UserTask;
-import io.camunda.zeebe.client.protocol.rest.UserTaskVariableFilterRequest;
+import io.camunda.client.ZeebeClient;
+import io.camunda.client.api.search.filter.UserTaskFilter;
+import io.camunda.client.api.search.response.UserTask;
+import io.camunda.client.protocol.rest.UserTaskVariableFilterRequest;
+import io.camunda.it.utils.BrokerITInvocationProvider;
 import io.camunda.zeebe.model.bpmn.builder.AbstractUserTaskBuilder;
 import io.camunda.zeebe.model.bpmn.builder.UserTaskBuilder;
 import io.camunda.zeebe.qa.util.cluster.TestStandaloneBroker;
@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-@ExtendWith(BrokerWithCamundaExporterITInvocationProvider.class)
+@ExtendWith(BrokerITInvocationProvider.class)
 public class UserTaskExporterIT {
 
   @TestTemplate
@@ -122,7 +122,6 @@ public class UserTaskExporterIT {
     @TestTemplate
     void shouldExportUserTaskVariable(final TestStandaloneBroker testBroker) {
       final var client = testBroker.newClientBuilder().build();
-
       // when
       ExporterTestUtil.createAndDeployUserTaskProcess(
           client, "test-process-id", "zeebe-task", AbstractUserTaskBuilder::zeebeUserTask);
@@ -149,7 +148,7 @@ public class UserTaskExporterIT {
               .newUserTaskQuery()
               .filter(
                   f ->
-                      f.variables(
+                      f.processInstanceVariables(
                           List.of(new UserTaskVariableFilterRequest().name("stringVariable"))))
               .send()
               .join()
@@ -162,7 +161,8 @@ public class UserTaskExporterIT {
               .newUserTaskQuery()
               .filter(
                   f ->
-                      f.variables(List.of(new UserTaskVariableFilterRequest().name("intVariable"))))
+                      f.processInstanceVariables(
+                          List.of(new UserTaskVariableFilterRequest().name("intVariable"))))
               .send()
               .join()
               .items();
@@ -174,7 +174,7 @@ public class UserTaskExporterIT {
               .newUserTaskQuery()
               .filter(
                   f ->
-                      f.variables(
+                      f.processInstanceVariables(
                           List.of(new UserTaskVariableFilterRequest().name("boolVariable"))))
               .send()
               .join()
@@ -187,7 +187,8 @@ public class UserTaskExporterIT {
               .newUserTaskQuery()
               .filter(
                   f ->
-                      f.variables(List.of(new UserTaskVariableFilterRequest().name("bigVariable"))))
+                      f.processInstanceVariables(
+                          List.of(new UserTaskVariableFilterRequest().name("bigVariable"))))
               .send()
               .join()
               .items();
@@ -199,7 +200,7 @@ public class UserTaskExporterIT {
               .newUserTaskQuery()
               .filter(
                   f ->
-                      f.variables(
+                      f.processInstanceVariables(
                           List.of(
                               new UserTaskVariableFilterRequest()
                                   .name("stringVariable")

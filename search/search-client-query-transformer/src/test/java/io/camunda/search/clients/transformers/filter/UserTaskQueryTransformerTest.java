@@ -7,19 +7,23 @@
  */
 package io.camunda.search.clients.transformers.filter;
 
+import static io.camunda.search.filter.Operation.eq;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.camunda.search.clients.query.SearchBoolQuery;
 import io.camunda.search.clients.query.SearchExistsQuery;
 import io.camunda.search.clients.query.SearchHasChildQuery;
+import io.camunda.search.clients.query.SearchHasParentQuery;
 import io.camunda.search.clients.query.SearchQuery;
 import io.camunda.search.clients.query.SearchQueryOption;
 import io.camunda.search.clients.query.SearchTermQuery;
 import io.camunda.search.filter.FilterBuilders;
+import io.camunda.search.filter.UntypedOperation;
 import io.camunda.search.filter.UserTaskFilter;
 import io.camunda.search.filter.UserTaskFilter.Builder;
 import io.camunda.search.filter.VariableValueFilter;
 import io.camunda.search.query.SearchQueryBuilders;
+import io.camunda.webapps.schema.entities.tasklist.TaskJoinRelationship.TaskJoinRelationshipType;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -35,11 +39,34 @@ public class UserTaskQueryTransformerTest extends AbstractTransformerTest {
 
     // then
     final SearchQueryOption queryVariant = searchRequest.queryOption();
+
     assertThat(queryVariant)
         .isInstanceOfSatisfying(
-            SearchExistsQuery.class,
+            SearchBoolQuery.class,
+            (boolQuery) -> {
+              assertThat(boolQuery.must())
+                  .anySatisfy(
+                      query ->
+                          assertThat(query.queryOption())
+                              .isInstanceOfSatisfying(
+                                  SearchExistsQuery.class,
+                                  (existsQuery) -> {
+                                    assertThat(existsQuery.field())
+                                        .isEqualTo("flowNodeInstanceId"); // Validate the field
+                                  }));
+            });
+
+    assertThat(queryVariant)
+        .isInstanceOfSatisfying(
+            SearchBoolQuery.class,
             (t) -> {
-              assertThat(t.field()).isEqualTo("flowNodeInstanceId"); // Retrieve only User Task
+              assertThat(t.must().get(1).queryOption())
+                  .isInstanceOfSatisfying(
+                      SearchTermQuery.class,
+                      (term) -> {
+                        assertThat(term.field()).isEqualTo("implementation");
+                        assertThat(term.value().stringValue()).isEqualTo("ZEEBE_USER_TASK");
+                      });
             });
   }
 
@@ -243,6 +270,31 @@ public class UserTaskQueryTransformerTest extends AbstractTransformerTest {
   }
 
   @Test
+  public void shouldQueryByElementInstanceKey() {
+    // given
+    final var filter = FilterBuilders.userTask((f) -> f.elementInstanceKeys(12345L));
+
+    // when
+    final var searchRequest = transformQuery(filter);
+
+    // then
+    final var queryVariant = searchRequest.queryOption();
+
+    assertThat(queryVariant)
+        .isInstanceOfSatisfying(
+            SearchBoolQuery.class,
+            (t) -> {
+              assertThat(t.must().get(0).queryOption())
+                  .isInstanceOfSatisfying(
+                      SearchTermQuery.class,
+                      (term) -> {
+                        assertThat(term.field()).isEqualTo("flowNodeInstanceId");
+                        assertThat(term.value().longValue()).isEqualTo(12345L);
+                      });
+            });
+  }
+
+  @Test
   public void shouldQueryByCandidateGroups() {
     // given
     final var filter = FilterBuilders.userTask((f) -> f.candidateGroups("candidateGroup1"));
@@ -268,15 +320,16 @@ public class UserTaskQueryTransformerTest extends AbstractTransformerTest {
   }
 
   @Test
-  public void shouldQueryByVariableValueFilter() {
+  public void shouldQueryByProcessInstanceVariableValueFilter() {
     // given
     final VariableValueFilter.Builder variableValueFilterBuilder =
         new VariableValueFilter.Builder();
-    variableValueFilterBuilder.name("test").eq("test").build();
+    variableValueFilterBuilder.name("test").valueOperation(UntypedOperation.of(eq("test"))).build();
 
     final VariableValueFilter variableFilterValue = variableValueFilterBuilder.build();
 
-    final var filter = FilterBuilders.userTask((f) -> f.variable(List.of(variableFilterValue)));
+    final var filter =
+        FilterBuilders.userTask((f) -> f.processInstanceVariables(List.of(variableFilterValue)));
     final var searchQuery = SearchQueryBuilders.userTaskSearchQuery((b) -> b.filter(filter));
 
     // when
@@ -292,25 +345,23 @@ public class UserTaskQueryTransformerTest extends AbstractTransformerTest {
               assertThat(outerBoolQuery.must()).isNotEmpty();
 
               final SearchQuery outerMustQuery = outerBoolQuery.must().get(0);
-              assertThat(outerMustQuery.queryOption()).isInstanceOf(SearchBoolQuery.class);
+              assertThat(outerMustQuery.queryOption()).isInstanceOf(SearchHasParentQuery.class);
 
               // Drill down into the nested SearchBoolQuery
-              final SearchBoolQuery nestedBoolQuery =
-                  (SearchBoolQuery) outerMustQuery.queryOption();
-              assertThat(nestedBoolQuery.should()).isNotEmpty();
+              final SearchHasParentQuery nestedHasParentQuery =
+                  (SearchHasParentQuery) outerMustQuery.queryOption();
+              assertThat(nestedHasParentQuery.parentType())
+                  .isEqualTo(TaskJoinRelationshipType.PROCESS.getType());
 
-              final SearchQuery shouldQuery = nestedBoolQuery.should().get(0);
-              assertThat(shouldQuery.queryOption()).isInstanceOf(SearchHasChildQuery.class);
-
+              // Drill down into the nested SearchHasChildQuery of the hasParentQuery
               final SearchHasChildQuery childQuery =
-                  (SearchHasChildQuery) shouldQuery.queryOption();
-              assertThat(childQuery.type()).isEqualTo("taskVariable");
+                  (SearchHasChildQuery) nestedHasParentQuery.query().queryOption();
+              assertThat(childQuery.type())
+                  .isEqualTo(TaskJoinRelationshipType.PROCESS_VARIABLE.getType());
 
-              // Check the inner bool query inside the child query
-              final SearchQuery innerQuery = childQuery.query();
-              assertThat(innerQuery.queryOption()).isInstanceOf(SearchBoolQuery.class);
-
-              final SearchBoolQuery innerBoolQuery = (SearchBoolQuery) innerQuery.queryOption();
+              // Drill down into the nested SearchBoolQuery of the hasChildQuery
+              final SearchBoolQuery innerBoolQuery =
+                  (SearchBoolQuery) childQuery.query().queryOption();
               assertThat(innerBoolQuery.must()).hasSize(2);
 
               assertThat(innerBoolQuery.must().get(0).queryOption())

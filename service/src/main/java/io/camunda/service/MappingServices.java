@@ -19,6 +19,7 @@ import io.camunda.service.search.core.SearchQueryService;
 import io.camunda.service.security.SecurityContextProvider;
 import io.camunda.zeebe.broker.client.api.BrokerClient;
 import io.camunda.zeebe.gateway.impl.broker.request.BrokerMappingCreateRequest;
+import io.camunda.zeebe.gateway.impl.broker.request.BrokerMappingDeleteRequest;
 import io.camunda.zeebe.protocol.impl.record.value.authorization.MappingRecord;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -56,7 +57,8 @@ public class MappingServices
     return sendBrokerRequest(
         new BrokerMappingCreateRequest()
             .setClaimName(request.claimName())
-            .setClaimValue(request.claimValue()));
+            .setClaimValue(request.claimValue())
+            .setName(request.name()));
   }
 
   public MappingEntity getMapping(final Long mappingKey) {
@@ -75,5 +77,20 @@ public class MappingServices
         .findFirst();
   }
 
-  public record MappingDTO(Long mappingKey, String claimName, String claimValue) {}
+  public Optional<MappingEntity> findMapping(final MappingDTO request) {
+    return search(
+            SearchQueryBuilders.mappingSearchQuery()
+                .filter(f -> f.claimName(request.claimName()).claimValue(request.claimValue()))
+                .page(p -> p.size(1))
+                .build())
+        .items()
+        .stream()
+        .findFirst();
+  }
+
+  public CompletableFuture<MappingRecord> deleteMapping(final long mappingKey) {
+    return sendBrokerRequest(new BrokerMappingDeleteRequest().setMappingKey(mappingKey));
+  }
+
+  public record MappingDTO(String claimName, String claimValue, String name) {}
 }

@@ -7,7 +7,7 @@
  */
 package io.camunda.tasklist.webapp.service;
 
-import static io.camunda.zeebe.client.api.command.CommandWithTenantStep.DEFAULT_TENANT_IDENTIFIER;
+import static io.camunda.client.api.command.CommandWithTenantStep.DEFAULT_TENANT_IDENTIFIER;
 import static java.util.Collections.emptySet;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -15,16 +15,22 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.camunda.client.ZeebeClient;
+import io.camunda.client.api.ZeebeFuture;
+import io.camunda.client.api.command.AssignUserTaskCommandStep1;
+import io.camunda.client.api.command.ClientException;
+import io.camunda.client.api.command.CompleteJobCommandStep1;
+import io.camunda.client.api.command.CompleteUserTaskCommandStep1;
+import io.camunda.client.api.command.UnassignUserTaskCommandStep1;
+import io.camunda.client.protocol.rest.ProblemDetail;
 import io.camunda.tasklist.Metrics;
-import io.camunda.tasklist.entities.TaskEntity;
-import io.camunda.tasklist.entities.TaskImplementation;
-import io.camunda.tasklist.entities.TaskState;
 import io.camunda.tasklist.exceptions.NotFoundException;
 import io.camunda.tasklist.exceptions.TasklistRuntimeException;
 import io.camunda.tasklist.store.TaskMetricsStore;
@@ -32,29 +38,27 @@ import io.camunda.tasklist.store.TaskStore;
 import io.camunda.tasklist.store.VariableStore.GetVariablesRequest;
 import io.camunda.tasklist.views.TaskSearchView;
 import io.camunda.tasklist.webapp.CommonUtils;
+import io.camunda.tasklist.webapp.dto.TaskDTO;
+import io.camunda.tasklist.webapp.dto.TaskQueryDTO;
+import io.camunda.tasklist.webapp.dto.UserDTO;
+import io.camunda.tasklist.webapp.dto.VariableDTO;
+import io.camunda.tasklist.webapp.dto.VariableInputDTO;
 import io.camunda.tasklist.webapp.es.TaskValidator;
-import io.camunda.tasklist.webapp.graphql.entity.TaskDTO;
-import io.camunda.tasklist.webapp.graphql.entity.TaskQueryDTO;
-import io.camunda.tasklist.webapp.graphql.entity.UserDTO;
-import io.camunda.tasklist.webapp.graphql.entity.VariableDTO;
-import io.camunda.tasklist.webapp.graphql.entity.VariableInputDTO;
 import io.camunda.tasklist.webapp.rest.exception.ForbiddenActionException;
 import io.camunda.tasklist.webapp.rest.exception.InvalidRequestException;
 import io.camunda.tasklist.webapp.security.AssigneeMigrator;
+import io.camunda.tasklist.webapp.security.TasklistAuthenticationUtil;
 import io.camunda.tasklist.webapp.security.UserReader;
-import io.camunda.zeebe.client.ZeebeClient;
-import io.camunda.zeebe.client.api.ZeebeFuture;
-import io.camunda.zeebe.client.api.command.AssignUserTaskCommandStep1;
-import io.camunda.zeebe.client.api.command.ClientException;
-import io.camunda.zeebe.client.api.command.CompleteJobCommandStep1;
-import io.camunda.zeebe.client.api.command.CompleteUserTaskCommandStep1;
-import io.camunda.zeebe.client.api.command.UnassignUserTaskCommandStep1;
-import io.camunda.zeebe.client.protocol.rest.ProblemDetail;
+import io.camunda.webapps.schema.entities.tasklist.TaskEntity;
+import io.camunda.webapps.schema.entities.tasklist.TaskEntity.TaskImplementation;
+import io.camunda.webapps.schema.entities.tasklist.TaskState;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -62,10 +66,14 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class TaskServiceTest {
 
   @Mock private UserReader userReader;
@@ -79,6 +87,18 @@ class TaskServiceTest {
   @Mock private TaskValidator taskValidator;
 
   @InjectMocks private TaskService instance;
+
+  private MockedStatic<TasklistAuthenticationUtil> authenticationUtil;
+
+  @BeforeEach
+  public void setUp() {
+    authenticationUtil = mockStatic(TasklistAuthenticationUtil.class);
+  }
+
+  @AfterEach
+  public void tearDown() {
+    authenticationUtil.close();
+  }
 
   @Test
   void getTasks() {
@@ -260,18 +280,20 @@ class TaskServiceTest {
   @Test
   void getTask() {
     // Given
-    final String taskId = "123";
-    final var providedTask = new TaskEntity().setId(taskId).setState(TaskState.CREATED);
+    final var taskId = 123L;
+    final var taskIdAsString = String.valueOf(taskId);
+    final var providedTask =
+        new TaskEntity().setId(taskIdAsString).setKey(taskId).setState(TaskState.CREATED);
     final var expectedTask =
         new TaskDTO()
-            .setId(taskId)
+            .setId(taskIdAsString)
             .setTaskState(TaskState.CREATED)
             .setTenantId(DEFAULT_TENANT_IDENTIFIER)
             .setPriority(50);
-    when(taskStore.getTask(taskId)).thenReturn(providedTask);
+    when(taskStore.getTask(taskIdAsString)).thenReturn(providedTask);
 
     // When
-    final var result = instance.getTask(taskId);
+    final var result = instance.getTask(taskIdAsString);
 
     // Then
     assertThat(result).isEqualTo(expectedTask);
@@ -281,10 +303,10 @@ class TaskServiceTest {
     final var userA = "userA";
     final var userB = "userB";
     return Stream.of(
-        Arguments.of(null, true, userA, new UserDTO().setUserId(userA), userA),
-        Arguments.of(false, false, userA, new UserDTO().setUserId(userB).setApiUser(true), userA),
-        Arguments.of(true, true, null, new UserDTO().setUserId(userB), userB),
-        Arguments.of(true, true, "", new UserDTO().setUserId(userB), userB));
+        Arguments.of(null, true, userA, new UserDTO().setUserId(userA), false, userA),
+        Arguments.of(false, false, userA, new UserDTO().setUserId(userB), true, userA),
+        Arguments.of(true, true, null, new UserDTO().setUserId(userB), false, userB),
+        Arguments.of(true, true, "", new UserDTO().setUserId(userB), false, userB));
   }
 
   @ParameterizedTest
@@ -294,9 +316,11 @@ class TaskServiceTest {
       final boolean expectedAllowOverrideAssignment,
       final String providedAssignee,
       final UserDTO user,
+      final boolean isApiUser,
       final String expectedAssignee) {
 
     // Given
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(isApiUser);
     final var taskId = "123";
     final var taskBefore = mock(TaskEntity.class);
     when(taskStore.getTask(taskId)).thenReturn(taskBefore);
@@ -317,8 +341,9 @@ class TaskServiceTest {
   @Test
   public void assignTaskByApiUser() {
     // given
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(true);
     final var taskId = "123";
-    when(userReader.getCurrentUser()).thenReturn(new UserDTO().setUserId("userA").setApiUser(true));
+    when(userReader.getCurrentUser()).thenReturn(new UserDTO().setUserId("userA"));
 
     // when - then
     verifyNoInteractions(taskStore, taskValidator);
@@ -330,8 +355,9 @@ class TaskServiceTest {
   @Test
   public void assignTaskToEmptyUser() {
     // given
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(true);
     final var taskId = "123";
-    when(userReader.getCurrentUser()).thenReturn(new UserDTO().setUserId("userA").setApiUser(true));
+    when(userReader.getCurrentUser()).thenReturn(new UserDTO().setUserId("userA"));
 
     // when - then
     verifyNoInteractions(taskStore, taskValidator);
@@ -343,8 +369,9 @@ class TaskServiceTest {
   @Test
   public void assignTaskToInvalidTask() {
     // given
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(true);
     final var taskId = "123";
-    when(userReader.getCurrentUser()).thenReturn(new UserDTO().setUserId("userA").setApiUser(true));
+    when(userReader.getCurrentUser()).thenReturn(new UserDTO().setUserId("userA"));
     when(taskStore.getTask(taskId))
         .thenThrow(new NotFoundException("task with id " + taskId + " was not found "));
 
@@ -555,8 +582,10 @@ class TaskServiceTest {
       final boolean expectedAllowOverrideAssignment,
       final String providedAssignee,
       final UserDTO user,
+      final boolean isApiUser,
       final String expectedAssignee) {
     // Given
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(isApiUser);
     final var taskId = "123";
     final var taskBefore = mock(TaskEntity.class);
 

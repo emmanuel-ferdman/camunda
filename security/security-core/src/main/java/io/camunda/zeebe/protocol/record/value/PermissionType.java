@@ -8,6 +8,8 @@
 package io.camunda.zeebe.protocol.record.value;
 
 public enum PermissionType {
+  ACCESS,
+
   CREATE,
   CREATE_PROCESS_INSTANCE,
   CREATE_DECISION_INSTANCE,
@@ -15,6 +17,7 @@ public enum PermissionType {
   READ,
   READ_PROCESS_INSTANCE,
   READ_USER_TASK,
+  READ_DECISION_INSTANCE,
 
   UPDATE,
   UPDATE_PROCESS_INSTANCE,
@@ -23,5 +26,6 @@ public enum PermissionType {
   DELETE,
   DELETE_PROCESS,
   DELETE_DRD,
-  DELETE_FORM
+  DELETE_FORM,
+  DELETE_PROCESS_INSTANCE
 }

@@ -19,12 +19,12 @@ import static io.camunda.zeebe.spring.client.configuration.PropertyUtil.*;
 import static io.camunda.zeebe.spring.client.properties.ZeebeClientConfigurationProperties.*;
 import static org.springframework.util.StringUtils.hasText;
 
-import io.camunda.zeebe.client.CredentialsProvider;
-import io.camunda.zeebe.client.ZeebeClientConfiguration;
-import io.camunda.zeebe.client.api.JsonMapper;
-import io.camunda.zeebe.client.impl.NoopCredentialsProvider;
-import io.camunda.zeebe.client.impl.oauth.OAuthCredentialsProviderBuilder;
-import io.camunda.zeebe.client.impl.util.Environment;
+import io.camunda.client.CredentialsProvider;
+import io.camunda.client.ZeebeClientConfiguration;
+import io.camunda.client.api.JsonMapper;
+import io.camunda.client.impl.NoopCredentialsProvider;
+import io.camunda.client.impl.oauth.OAuthCredentialsProviderBuilder;
+import io.camunda.client.impl.util.Environment;
 import io.camunda.zeebe.spring.client.jobhandling.ZeebeClientExecutorService;
 import io.camunda.zeebe.spring.client.properties.CamundaClientProperties;
 import io.camunda.zeebe.spring.client.properties.CamundaClientProperties.ClientMode;
@@ -34,6 +34,9 @@ import io.grpc.ClientInterceptor;
 import jakarta.annotation.PostConstruct;
 import java.net.MalformedURLException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -336,15 +339,38 @@ public class ZeebeClientConfigurationImpl implements ZeebeClientConfiguration {
   private CredentialsProvider credentialsProvider() {
     final ClientMode clientMode = camundaClientProperties.getMode();
     if (ClientMode.selfManaged.equals(clientMode) || ClientMode.saas.equals(clientMode)) {
-      return CredentialsProvider.newCredentialsProviderBuilder()
-          .clientId(camundaClientProperties.getAuth().getClientId())
-          .clientSecret(camundaClientProperties.getAuth().getClientSecret())
-          .audience(camundaClientProperties.getZeebe().getAudience())
-          .authorizationServerUrl(camundaClientProperties.getAuth().getIssuer())
-          .scope(camundaClientProperties.getZeebe().getScope())
-          .build();
+      final OAuthCredentialsProviderBuilder credBuilder =
+          CredentialsProvider.newCredentialsProviderBuilder()
+              .clientId(camundaClientProperties.getAuth().getClientId())
+              .clientSecret(camundaClientProperties.getAuth().getClientSecret())
+              .audience(camundaClientProperties.getZeebe().getAudience())
+              .authorizationServerUrl(camundaClientProperties.getAuth().getIssuer())
+              .scope(camundaClientProperties.getZeebe().getScope());
+
+      maybeConfigureIdentityProviderSSLConfig(credBuilder);
+
+      return credBuilder.build();
     }
     return new NoopCredentialsProvider();
+  }
+
+  private void maybeConfigureIdentityProviderSSLConfig(OAuthCredentialsProviderBuilder builder) {
+    if (camundaClientProperties.getAuth().getKeystorePath() != null) {
+      final Path keyStore = Paths.get(camundaClientProperties.getAuth().getKeystorePath());
+      if (Files.exists(keyStore)) {
+        builder.keystorePath(keyStore);
+        builder.keystorePassword(camundaClientProperties.getAuth().getKeystorePassword());
+        builder.keystoreKeyPassword(camundaClientProperties.getAuth().getKeystoreKeyPassword());
+      }
+    }
+
+    if (camundaClientProperties.getAuth().getTruststorePath() != null) {
+      final Path trustStore = Paths.get(camundaClientProperties.getAuth().getTruststorePath());
+      if (Files.exists(trustStore)) {
+        builder.truststorePath(trustStore);
+        builder.truststorePassword(camundaClientProperties.getAuth().getTruststorePassword());
+      }
+    }
   }
 
   private String composeGatewayAddress() {

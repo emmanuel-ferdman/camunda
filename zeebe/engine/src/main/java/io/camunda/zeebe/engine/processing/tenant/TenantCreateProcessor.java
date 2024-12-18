@@ -7,6 +7,7 @@
  */
 package io.camunda.zeebe.engine.processing.tenant;
 
+import io.camunda.zeebe.engine.processing.Rejection;
 import io.camunda.zeebe.engine.processing.distribution.CommandDistributionBehavior;
 import io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior;
 import io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior.AuthorizationRequest;
@@ -27,6 +28,8 @@ import io.camunda.zeebe.stream.api.state.KeyGenerator;
 
 public class TenantCreateProcessor implements DistributedTypedRecordProcessor<TenantRecord> {
 
+  private static final String TENANT_ALREADY_EXISTS_ERROR_MESSAGE =
+      "Expected to create tenant with ID '%s', but a tenant with this ID already exists";
   private final TenantState tenantState;
   private final AuthorizationCheckBehavior authCheckBehavior;
   private final KeyGenerator keyGenerator;
@@ -61,8 +64,7 @@ public class TenantCreateProcessor implements DistributedTypedRecordProcessor<Te
       rejectCommand(
           command,
           RejectionType.ALREADY_EXISTS,
-          "Expected to create tenant with ID '%s', but a tenant with this ID already exists"
-              .formatted(record.getTenantId()));
+          TENANT_ALREADY_EXISTS_ERROR_MESSAGE.formatted(record.getTenantId()));
     } else {
       createTenant(command, record);
       distributeCommand(command, record);
@@ -71,15 +73,26 @@ public class TenantCreateProcessor implements DistributedTypedRecordProcessor<Te
 
   @Override
   public void processDistributedCommand(final TypedRecord<TenantRecord> command) {
-    stateWriter.appendFollowUpEvent(command.getKey(), TenantIntent.CREATED, command.getValue());
+    final var record = command.getValue();
+    tenantState
+        .getTenantByKey(record.getTenantKey())
+        .ifPresentOrElse(
+            tenant -> {
+              final var errorMessage =
+                  TENANT_ALREADY_EXISTS_ERROR_MESSAGE.formatted(tenant.getTenantId());
+              rejectionWriter.appendRejection(command, RejectionType.ALREADY_EXISTS, errorMessage);
+            },
+            () -> stateWriter.appendFollowUpEvent(command.getKey(), TenantIntent.CREATED, record));
+
     commandDistributionBehavior.acknowledgeCommand(command);
   }
 
   private boolean isAuthorizedToCreate(final TypedRecord<TenantRecord> command) {
     final var authorizationRequest =
         new AuthorizationRequest(command, AuthorizationResourceType.TENANT, PermissionType.CREATE);
-    if (!authCheckBehavior.isAuthorized(authorizationRequest)) {
-      rejectCommandWithUnauthorizedError(command, authorizationRequest);
+    final var isAuthorized = authCheckBehavior.isAuthorized(authorizationRequest);
+    if (isAuthorized.isLeft()) {
+      rejectCommandWithUnauthorizedError(command, isAuthorized.getLeft());
       return false;
     }
     return true;
@@ -106,11 +119,8 @@ public class TenantCreateProcessor implements DistributedTypedRecordProcessor<Te
   }
 
   private void rejectCommandWithUnauthorizedError(
-      final TypedRecord<TenantRecord> command, final AuthorizationRequest authorizationRequest) {
-    final var errorMessage =
-        AuthorizationCheckBehavior.UNAUTHORIZED_ERROR_MESSAGE.formatted(
-            authorizationRequest.getPermissionType(), authorizationRequest.getResourceType());
-    rejectCommand(command, RejectionType.UNAUTHORIZED, errorMessage);
+      final TypedRecord<TenantRecord> command, final Rejection rejection) {
+    rejectCommand(command, rejection.type(), rejection.reason());
   }
 
   private void rejectCommand(

@@ -7,13 +7,11 @@
  */
 package io.camunda.it.utils;
 
-import static io.camunda.zeebe.engine.processing.user.DefaultUserCreator.DEFAULT_USER_PASSWORD;
-import static io.camunda.zeebe.engine.processing.user.DefaultUserCreator.DEFAULT_USER_USERNAME;
-
-import io.camunda.zeebe.client.CredentialsProvider;
-import io.camunda.zeebe.client.ZeebeClient;
-import io.camunda.zeebe.client.protocol.rest.PermissionTypeEnum;
-import io.camunda.zeebe.client.protocol.rest.ResourceTypeEnum;
+import io.camunda.client.CredentialsProvider;
+import io.camunda.client.ZeebeClient;
+import io.camunda.client.protocol.rest.PermissionTypeEnum;
+import io.camunda.client.protocol.rest.ResourceTypeEnum;
+import io.camunda.security.configuration.InitializationConfiguration;
 import io.camunda.zeebe.qa.util.cluster.TestGateway;
 import io.camunda.zeebe.test.util.asserts.TopologyAssert;
 import java.lang.annotation.Documented;
@@ -28,14 +26,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.awaitility.Awaitility;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class ZeebeClientTestFactory implements AutoCloseable {
+
+  private static final Logger LOGGER = LoggerFactory.getLogger(ZeebeClientTestFactory.class);
 
   private final Map<String, User> usersRegistry = new HashMap<>();
   private final Map<String, ZeebeClient> cachedClients = new ConcurrentHashMap<>();
 
   public ZeebeClientTestFactory() {
-    usersRegistry.put(DEFAULT_USER_USERNAME, User.DEFAULT);
+    usersRegistry.put(InitializationConfiguration.DEFAULT_USER_USERNAME, User.DEFAULT);
   }
 
   public ZeebeClientTestFactory withUsers(final List<User> users) {
@@ -46,13 +48,21 @@ public final class ZeebeClientTestFactory implements AutoCloseable {
   public ZeebeClient createZeebeClient(
       final TestGateway<?> gateway, final Authenticated authenticated) {
     if (authenticated == null) {
+      LOGGER.info(
+          "Creating unauthorized Zeebe client for broker address '{}", gateway.restAddress());
       return gateway.newClientBuilder().build();
+    } else {
+      LOGGER.info(
+          "Creating Zeebe client for user '{}' and broker address '{}",
+          authenticated.value(),
+          gateway.restAddress());
     }
     final ZeebeClient defaultClient =
         cachedClients.computeIfAbsent(
-            DEFAULT_USER_USERNAME, __ -> createDefaultUserClient(gateway));
+            InitializationConfiguration.DEFAULT_USER_USERNAME,
+            __ -> createDefaultUserClient(gateway));
     final String username = authenticated.value();
-    if (DEFAULT_USER_USERNAME.equals(username)) {
+    if (InitializationConfiguration.DEFAULT_USER_USERNAME.equals(username)) {
       return defaultClient;
     } else {
       return cachedClients.computeIfAbsent(
@@ -69,7 +79,10 @@ public final class ZeebeClientTestFactory implements AutoCloseable {
 
   private ZeebeClient createDefaultUserClient(final TestGateway<?> gateway) {
     final ZeebeClient defaultClient =
-        createAuthenticatedClient(gateway, DEFAULT_USER_USERNAME, DEFAULT_USER_PASSWORD);
+        createAuthenticatedClient(
+            gateway,
+            InitializationConfiguration.DEFAULT_USER_USERNAME,
+            InitializationConfiguration.DEFAULT_USER_PASSWORD);
     // block until the default user is created
     Awaitility.await()
         .atMost(Duration.ofSeconds(20))
@@ -148,13 +161,16 @@ public final class ZeebeClientTestFactory implements AutoCloseable {
 
   public record User(String username, String password, List<Permissions> permissions) {
     public static final User DEFAULT =
-        new User(DEFAULT_USER_USERNAME, DEFAULT_USER_PASSWORD, List.of());
+        new User(
+            InitializationConfiguration.DEFAULT_USER_USERNAME,
+            InitializationConfiguration.DEFAULT_USER_PASSWORD,
+            List.of());
   }
 
   /**
-   * Annotation to be passed along with {@link BrokerWithCamundaExporterITInvocationProvider}'s
-   * {@link org.junit.jupiter.api.TestTemplate}. When applied, this indicates that the ZeebeClient
-   * should be created with the provided user's credentials.
+   * Annotation to be passed along with {@link BrokerITInvocationProvider}'s {@link
+   * org.junit.jupiter.api.TestTemplate}. When applied, this indicates that the ZeebeClient should
+   * be created with the provided user's credentials.
    */
   @Target(ElementType.PARAMETER)
   @Retention(RetentionPolicy.RUNTIME)
@@ -162,6 +178,6 @@ public final class ZeebeClientTestFactory implements AutoCloseable {
   public @interface Authenticated {
 
     /** The username of the user to be used for authentication. */
-    String value() default DEFAULT_USER_USERNAME;
+    String value() default InitializationConfiguration.DEFAULT_USER_USERNAME;
   }
 }

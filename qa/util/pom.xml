@@ -87,7 +87,7 @@
 
     <dependency>
       <groupId>io.camunda</groupId>
-      <artifactId>zeebe-client-java</artifactId>
+      <artifactId>camunda-client-java</artifactId>
     </dependency>
     <dependency>
       <groupId>io.camunda</groupId>
@@ -128,6 +128,10 @@
     <dependency>
       <groupId>io.camunda</groupId>
       <artifactId>camunda-exporter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.camunda</groupId>
+      <artifactId>camunda-security-core</artifactId>
     </dependency>
   </dependencies>
 </project>

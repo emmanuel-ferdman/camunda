@@ -19,9 +19,11 @@ import io.camunda.zeebe.protocol.record.intent.DecisionEvaluationIntent;
 import io.camunda.zeebe.protocol.record.intent.DeploymentIntent;
 import io.camunda.zeebe.protocol.record.intent.EscalationIntent;
 import io.camunda.zeebe.protocol.record.intent.GroupIntent;
+import io.camunda.zeebe.protocol.record.intent.IdentitySetupIntent;
 import io.camunda.zeebe.protocol.record.intent.IncidentIntent;
 import io.camunda.zeebe.protocol.record.intent.JobBatchIntent;
 import io.camunda.zeebe.protocol.record.intent.JobIntent;
+import io.camunda.zeebe.protocol.record.intent.MappingIntent;
 import io.camunda.zeebe.protocol.record.intent.MessageBatchIntent;
 import io.camunda.zeebe.protocol.record.intent.MessageCorrelationIntent;
 import io.camunda.zeebe.protocol.record.intent.MessageIntent;
@@ -52,6 +54,7 @@ import io.camunda.zeebe.protocol.record.value.DeploymentRecordValue;
 import io.camunda.zeebe.protocol.record.value.ErrorRecordValue;
 import io.camunda.zeebe.protocol.record.value.EscalationRecordValue;
 import io.camunda.zeebe.protocol.record.value.GroupRecordValue;
+import io.camunda.zeebe.protocol.record.value.IdentitySetupRecordValue;
 import io.camunda.zeebe.protocol.record.value.IncidentRecordValue;
 import io.camunda.zeebe.protocol.record.value.JobBatchRecordValue;
 import io.camunda.zeebe.protocol.record.value.JobRecordValue;
@@ -492,12 +495,25 @@ public final class RecordingExporter implements Exporter {
     return new MappingRecordStream(records(ValueType.MAPPING, MappingRecordValue.class));
   }
 
+  public static MappingRecordStream mappingRecords(final MappingIntent intent) {
+    return mappingRecords().withIntent(intent);
+  }
+
   public static GroupRecordStream groupRecords() {
     return new GroupRecordStream(records(ValueType.GROUP, GroupRecordValue.class));
   }
 
   public static GroupRecordStream groupRecords(final GroupIntent intent) {
     return groupRecords().withIntent(intent);
+  }
+
+  public static IdentitySetupRecordStream identitySetupRecords() {
+    return new IdentitySetupRecordStream(
+        records(ValueType.IDENTITY_SETUP, IdentitySetupRecordValue.class));
+  }
+
+  public static IdentitySetupRecordStream identitySetupRecords(final IdentitySetupIntent intent) {
+    return identitySetupRecords().withIntent(intent);
   }
 
   public static void autoAcknowledge(final boolean shouldAcknowledgeRecords) {

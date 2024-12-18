@@ -7,11 +7,12 @@
  */
 package io.camunda.tasklist.webapp.es;
 
-import io.camunda.tasklist.entities.TaskEntity;
-import io.camunda.tasklist.entities.TaskState;
-import io.camunda.tasklist.webapp.graphql.entity.UserDTO;
+import io.camunda.tasklist.webapp.dto.UserDTO;
 import io.camunda.tasklist.webapp.rest.exception.InvalidRequestException;
+import io.camunda.tasklist.webapp.security.TasklistAuthenticationUtil;
 import io.camunda.tasklist.webapp.security.UserReader;
+import io.camunda.webapps.schema.entities.tasklist.TaskEntity;
+import io.camunda.webapps.schema.entities.tasklist.TaskState;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -45,25 +46,27 @@ public class TaskValidator {
    * @throws InvalidRequestException If the task is not active, not assigned, or not assigned to the
    *     current user.
    */
-  private void validateTaskStateAndAssignment(TaskEntity task) {
+  private void validateTaskStateAndAssignment(final TaskEntity task) {
     validateTaskIsActive(task);
 
-    final UserDTO currentUser = getCurrentUser();
-    if (currentUser.isApiUser()) {
+    if (TasklistAuthenticationUtil.isApiUser()) {
       // JWT Token/API users are allowed to complete task assigned to anyone
       return;
     }
 
     validateTaskIsAssigned(task);
+
+    final UserDTO currentUser = getCurrentUser();
     if (!task.getAssignee().equals(currentUser.getUserId())) {
       throw new InvalidRequestException("Task is not assigned to " + currentUser.getUserId());
     }
   }
 
-  public void validateCanAssign(final TaskEntity taskBefore, boolean allowOverrideAssignment) {
+  public void validateCanAssign(
+      final TaskEntity taskBefore, final boolean allowOverrideAssignment) {
     validateTaskIsActive(taskBefore);
 
-    if (getCurrentUser().isApiUser() && allowOverrideAssignment) {
+    if (TasklistAuthenticationUtil.isApiUser() && allowOverrideAssignment) {
       // JWT Token/API users can reassign task
       return;
     }

@@ -26,6 +26,7 @@ const isMigratableFlowNode = (businessObject: BusinessObject) => {
         'bpmn:MessageEventDefinition',
         'bpmn:TimerEventDefinition',
         'bpmn:SignalEventDefinition',
+        'bpmn:CompensateEventDefinition',
       ],
     })
   ) {
@@ -67,6 +68,7 @@ const isMigratableFlowNode = (businessObject: BusinessObject) => {
         'bpmn:TimerEventDefinition',
         'bpmn:SignalEventDefinition',
         'bpmn:ErrorEventDefinition',
+        'bpmn:EscalationEventDefinition',
       ],
     });
   }
@@ -77,7 +79,12 @@ const isMigratableFlowNode = (businessObject: BusinessObject) => {
   if (
     hasType({
       businessObject,
-      types: ['bpmn:ExclusiveGateway', 'bpmn:EventBasedGateway'],
+      types: [
+        'bpmn:ExclusiveGateway',
+        'bpmn:EventBasedGateway',
+        'bpmn:InclusiveGateway',
+        'bpmn:ParallelGateway',
+      ],
     })
   ) {
     return true;
@@ -94,6 +101,8 @@ const isMigratableFlowNode = (businessObject: BusinessObject) => {
         'bpmn:TimerEventDefinition',
         'bpmn:SignalEventDefinition',
         'bpmn:ErrorEventDefinition',
+        'bpmn:EscalationEventDefinition',
+        'bpmn:MessageEventDefinition',
       ],
     }) &&
     businessObject.$parent !== undefined &&

@@ -28,8 +28,8 @@ import io.camunda.security.auth.Authorization;
 import io.camunda.service.DecisionInstanceServices;
 import io.camunda.service.exception.ForbiddenException;
 import io.camunda.util.ObjectBuilder;
-import io.camunda.zeebe.gateway.rest.JacksonConfig;
 import io.camunda.zeebe.gateway.rest.RestControllerTest;
+import io.camunda.zeebe.gateway.rest.config.JacksonConfig;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.function.Function;
@@ -44,9 +44,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 
-@WebMvcTest(
-    value = DecisionInstanceQueryController.class,
-    properties = "camunda.rest.query.enabled=true")
+@WebMvcTest(value = DecisionInstanceController.class)
 @Import(JacksonConfig.class)
 public class DecisionInstanceQueryControllerTest extends RestControllerTest {
 
@@ -71,7 +69,7 @@ public class DecisionInstanceQueryControllerTest extends RestControllerTest {
                ],
                "page": {
                    "totalItems": 1,
-                   "firstSortValues": [],
+                   "firstSortValues": ["f"],
                    "lastSortValues": [
                        "v"
                    ]
@@ -100,7 +98,8 @@ public class DecisionInstanceQueryControllerTest extends RestControllerTest {
                       "result",
                       null,
                       null)))
-          .sortValues(new Object[] {"v"})
+          .firstSortValues(new Object[] {"f"})
+          .lastSortValues(new Object[] {"v"})
           .build();
 
   @MockBean private DecisionInstanceServices decisionInstanceServices;
@@ -148,7 +147,7 @@ public class DecisionInstanceQueryControllerTest extends RestControllerTest {
           "sort": [
                 {
                     "field": "decisionDefinitionName",
-                    "order": "desc"
+                    "order": "DESC"
                 }
           ]
       }""",
@@ -342,7 +341,8 @@ public class DecisionInstanceQueryControllerTest extends RestControllerTest {
     final var decisionInstanceId = "123-1";
     when(decisionInstanceServices.getById(decisionInstanceId))
         .thenThrow(
-            new ForbiddenException(Authorization.of(a -> a.decisionDefinition().readInstance())));
+            new ForbiddenException(
+                Authorization.of(a -> a.decisionDefinition().readDecisionInstance())));
     // when
     webClient
         .get()
@@ -359,7 +359,7 @@ public class DecisionInstanceQueryControllerTest extends RestControllerTest {
                   "type": "about:blank",
                   "title": "io.camunda.service.exception.ForbiddenException",
                   "status": 403,
-                  "detail": "Unauthorized to perform operation 'READ_PROCESS_INSTANCE' on resource 'DECISION_DEFINITION'",
+                  "detail": "Unauthorized to perform operation 'READ_DECISION_INSTANCE' on resource 'DECISION_DEFINITION'",
                   "instance": "/v2/decision-instances/123-1"
                 }""");
   }

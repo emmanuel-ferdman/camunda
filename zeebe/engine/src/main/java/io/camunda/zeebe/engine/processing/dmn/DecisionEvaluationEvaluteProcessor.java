@@ -70,17 +70,20 @@ public class DecisionEvaluationEvaluteProcessor
           new AuthorizationRequest(
                   command,
                   AuthorizationResourceType.DECISION_DEFINITION,
-                  PermissionType.CREATE_DECISION_INSTANCE)
+                  PermissionType.CREATE_DECISION_INSTANCE,
+                  record.getTenantId())
               .addResourceId(decisionId);
 
-      if (!authCheckBehavior.isAuthorized(authRequest)) {
-        final var reason =
-            AuthorizationCheckBehavior.UNAUTHORIZED_ERROR_MESSAGE_WITH_RESOURCE.formatted(
-                authRequest.getPermissionType(),
-                authRequest.getResourceType(),
-                "decision id '%s'".formatted(decisionId));
-        responseWriter.writeRejectionOnCommand(command, RejectionType.UNAUTHORIZED, reason);
-        rejectionWriter.appendRejection(command, RejectionType.UNAUTHORIZED, reason);
+      final var isAuthorized = authCheckBehavior.isAuthorized(authRequest);
+      if (isAuthorized.isLeft()) {
+        final var rejection = isAuthorized.getLeft();
+        final String errorMessage =
+            RejectionType.NOT_FOUND.equals(rejection.type())
+                ? AuthorizationCheckBehavior.NOT_FOUND_ERROR_MESSAGE.formatted(
+                    "evaluate a decision", record.getDecisionKey(), "such decision")
+                : rejection.reason();
+        responseWriter.writeRejectionOnCommand(command, rejection.type(), errorMessage);
+        rejectionWriter.appendRejection(command, rejection.type(), errorMessage);
         return;
       }
     }

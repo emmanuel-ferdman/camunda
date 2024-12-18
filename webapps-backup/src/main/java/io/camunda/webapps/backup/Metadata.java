@@ -7,4 +7,8 @@
  */
 package io.camunda.webapps.backup;
 
-public record Metadata(Long backupId, String version, Integer partNo, Integer partCount) {}
+public record Metadata(Long backupId, String version, Integer partNo, Integer partCount) {
+
+  // used by open search backend
+
+}

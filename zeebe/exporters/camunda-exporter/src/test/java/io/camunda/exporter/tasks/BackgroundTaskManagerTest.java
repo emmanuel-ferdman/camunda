@@ -10,8 +10,8 @@ package io.camunda.exporter.tasks;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
-import io.camunda.exporter.config.ExporterConfiguration.ArchiverConfiguration;
 import io.camunda.exporter.tasks.archiver.ArchiverRepository.NoopArchiverRepository;
+import io.camunda.exporter.tasks.incident.IncidentUpdateRepository.NoopIncidentUpdateRepository;
 import io.camunda.zeebe.test.util.junit.AutoCloseResources;
 import io.camunda.zeebe.test.util.junit.AutoCloseResources.AutoCloseResource;
 import java.util.List;
@@ -35,11 +35,11 @@ final class BackgroundTaskManagerTest {
         new BackgroundTaskManager(
             1,
             new NoopArchiverRepository(),
+            new NoopIncidentUpdateRepository(),
             LoggerFactory.getLogger(BackgroundTaskManagerTest.class),
             executor,
             // return unfinished futures to have a deterministic count of submitted tasks
-            List.of(CompletableFuture::new, CompletableFuture::new),
-            new ArchiverConfiguration());
+            List.of(CompletableFuture::new, CompletableFuture::new));
 
     @Test
     void shouldNotResubmitTasksOnStart() {
@@ -88,44 +88,71 @@ final class BackgroundTaskManagerTest {
 
   @Nested
   final class CloseTest {
-    private final CloseableRepository repository = new CloseableRepository();
-    private final BackgroundTaskManager archiver =
+    private final CloseableArchiverRepository archiverRepository =
+        new CloseableArchiverRepository();
+    private final CloseableIncidentRepository incidentRepository =
+        new CloseableIncidentRepository();
+    private final BackgroundTaskManager taskManager =
         new BackgroundTaskManager(
             1,
-            repository,
+            archiverRepository,
+            incidentRepository,
             LoggerFactory.getLogger(BackgroundTaskManagerTest.class),
             executor,
-            List.of(),
-            new ArchiverConfiguration());
+            List.of());
 
     @Test
     void shouldCloseExecutorOnClose() {
       // when
-      archiver.close();
+      taskManager.close();
 
       // then
       assertThat(executor.isTerminated()).isTrue();
     }
 
     @Test
-    void shouldCloseRepositoryOnClose() {
+    void shouldCloseRepositoriesOnClose() {
       // when
-      archiver.close();
+      taskManager.close();
 
       // then
-      assertThat(repository.isClosed).isTrue();
+      assertThat(archiverRepository.isClosed).isTrue();
+      assertThat(incidentRepository.isClosed).isTrue();
     }
 
     @Test
-    void shouldNotThrowOnRepositoryCloseError() {
+    void shouldNotThrowOnArchiverRepositoryCloseError() {
       // given
-      repository.exception = new RuntimeException("foo");
+      archiverRepository.exception = new RuntimeException("foo");
 
       // when
-      assertThatCode(archiver::close).doesNotThrowAnyException();
+      assertThatCode(taskManager::close).doesNotThrowAnyException();
     }
 
-    private static final class CloseableRepository extends NoopArchiverRepository {
+    @Test
+    void shouldNotThrowOnIncidentRepositoryCloseError() {
+      // given
+      incidentRepository.exception = new RuntimeException("foo");
+
+      // when
+      assertThatCode(taskManager::close).doesNotThrowAnyException();
+    }
+
+    private static final class CloseableArchiverRepository extends NoopArchiverRepository {
+      private boolean isClosed;
+      private Exception exception;
+
+      @Override
+      public void close() throws Exception {
+        if (exception != null) {
+          throw exception;
+        }
+
+        isClosed = true;
+      }
+    }
+
+    private static final class CloseableIncidentRepository extends NoopIncidentUpdateRepository {
       private boolean isClosed;
       private Exception exception;
 

@@ -50,6 +50,34 @@ public class FlowNodeInstanceIT {
   }
 
   @TestTemplate
+  public void shouldSaveLogAndResolveIncident(final CamundaRdbmsTestApplication testApplication) {
+    final RdbmsService rdbmsService = testApplication.getRdbmsService();
+    final RdbmsWriter rdbmsWriter = rdbmsService.createWriter(PARTITION_ID);
+    final FlowNodeInstanceReader flowNodeInstanceReader = rdbmsService.getFlowNodeInstanceReader();
+
+    final FlowNodeInstanceDbModel original = createAndSaveFlowNodeInstance(rdbmsWriter, b -> b);
+    rdbmsWriter.getFlowNodeInstanceWriter().createIncident(original.flowNodeInstanceKey(), 42L);
+    rdbmsWriter.flush();
+
+    final var instance =
+        flowNodeInstanceReader.findOne(original.flowNodeInstanceKey()).orElse(null);
+
+    assertThat(instance).isNotNull();
+    assertThat(instance.hasIncident()).isTrue();
+    assertThat(instance.incidentKey()).isEqualTo(42L);
+
+    rdbmsWriter.getFlowNodeInstanceWriter().resolveIncident(original.flowNodeInstanceKey());
+    rdbmsWriter.flush();
+
+    final var resolvedInstance =
+        flowNodeInstanceReader.findOne(original.flowNodeInstanceKey()).orElse(null);
+
+    assertThat(resolvedInstance).isNotNull();
+    assertThat(resolvedInstance.hasIncident()).isFalse();
+    assertThat(resolvedInstance.incidentKey()).isNull();
+  }
+
+  @TestTemplate
   public void shouldFindFlowNodeInstanceByProcessDefinitionId(
       final CamundaRdbmsTestApplication testApplication) {
     final RdbmsService rdbmsService = testApplication.getRdbmsService();
@@ -153,7 +181,8 @@ public class FlowNodeInstanceIT {
 
     assertThat(searchResult.total()).isEqualTo(1);
     assertThat(searchResult.items()).hasSize(1);
-    assertThat(searchResult.items().getFirst().key()).isEqualTo(instance.flowNodeInstanceKey());
+    assertThat(searchResult.items().getFirst().flowNodeInstanceKey())
+        .isEqualTo(instance.flowNodeInstanceKey());
   }
 
   private static void compareFlowNodeInstance(
@@ -163,18 +192,17 @@ public class FlowNodeInstanceIT {
         .ignoringFields(
             "startDate",
             "endDate",
-            "incident",
+            "hasIncident",
             "incidentKey",
             "treePath",
-            "scopeKey",
             "processDefinitionId",
             "bpmnProcessId",
             "flowNodeInstanceKey",
             "key")
         .isEqualTo(expected);
 
-    assertThat(actual.key()).isEqualTo(expected.flowNodeInstanceKey());
-    assertThat(actual.bpmnProcessId()).isEqualTo(expected.processDefinitionId());
+    assertThat(actual.flowNodeInstanceKey()).isEqualTo(expected.flowNodeInstanceKey());
+    assertThat(actual.processDefinitionId()).isEqualTo(expected.processDefinitionId());
     assertThat(actual.startDate())
         .isCloseTo(expected.startDate(), new TemporalUnitWithinOffset(1, ChronoUnit.MILLIS));
     assertThat(actual.endDate())
@@ -220,7 +248,7 @@ public class FlowNodeInstanceIT {
                                           instanceAfter.type(),
                                           instanceAfter.tenantId(),
                                           instanceAfter.startDate(),
-                                          instanceAfter.key()
+                                          instanceAfter.flowNodeInstanceKey()
                                         }))));
 
     assertThat(nextPage.total()).isEqualTo(20);

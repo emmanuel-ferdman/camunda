@@ -22,14 +22,13 @@ import io.camunda.security.auth.Authentication;
 import io.camunda.service.RoleServices;
 import io.camunda.zeebe.gateway.rest.RestControllerTest;
 import java.util.List;
-import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 
-@WebMvcTest(value = RoleQueryController.class, properties = "camunda.rest.query.enabled=true")
+@WebMvcTest(value = RoleController.class)
 public class RoleQueryControllerTest extends RestControllerTest {
   private static final String ROLE_BASE_URL = "/v2/roles";
 
@@ -43,13 +42,13 @@ public class RoleQueryControllerTest extends RestControllerTest {
   @Test
   void getRoleShouldReturnOk() {
     // given
-    final var role = new RoleEntity(100L, "Role Name", Set.of());
-    when(roleServices.getRole(role.key())).thenReturn(role);
+    final var role = new RoleEntity(100L, "Role Name");
+    when(roleServices.getRole(role.roleKey())).thenReturn(role);
 
     // when
     webClient
         .get()
-        .uri("%s/%s".formatted(ROLE_BASE_URL, role.key()))
+        .uri("%s/%s".formatted(ROLE_BASE_URL, role.roleKey()))
         .accept(MediaType.APPLICATION_JSON)
         .exchange()
         .expectStatus()
@@ -63,7 +62,7 @@ public class RoleQueryControllerTest extends RestControllerTest {
             }""");
 
     // then
-    verify(roleServices, times(1)).getRole(role.key());
+    verify(roleServices, times(1)).getRole(role.roleKey());
   }
 
   @Test
@@ -104,12 +103,13 @@ public class RoleQueryControllerTest extends RestControllerTest {
         .thenReturn(
             new SearchQueryResult.Builder<RoleEntity>()
                 .total(3)
-                .sortValues(new Object[] {})
+                .firstSortValues(new Object[] {"f"})
+                .lastSortValues(new Object[] {"v"})
                 .items(
                     List.of(
-                        new RoleEntity(100L, "Role 1", Set.of()),
-                        new RoleEntity(200L, "Role 2", Set.of(1L, 2L)),
-                        new RoleEntity(300L, "Role 12", Set.of(3L))))
+                        new RoleEntity(100L, "Role 1"),
+                        new RoleEntity(200L, "Role 2"),
+                        new RoleEntity(300L, "Role 12")))
                 .build());
 
     // when / then
@@ -131,24 +131,21 @@ public class RoleQueryControllerTest extends RestControllerTest {
              "items": [
                {
                  "key": 100,
-                 "name": "Role 1",
-                 "assignedMemberKeys": []
+                 "name": "Role 1"
                },
                {
                  "key": 200,
-                 "name": "Role 2",
-                 "assignedMemberKeys": [1, 2]
+                 "name": "Role 2"
                },
                {
                  "key": 300,
-                 "name": "Role 12",
-                 "assignedMemberKeys": [3]
+                 "name": "Role 12"
                }
              ],
              "page": {
                "totalItems": 3,
-               "firstSortValues": [],
-               "lastSortValues": []
+               "firstSortValues": ["f"],
+               "lastSortValues": ["v"]
              }
            }""");
 
@@ -164,9 +161,9 @@ public class RoleQueryControllerTest extends RestControllerTest {
                 .total(3)
                 .items(
                     List.of(
-                        new RoleEntity(100L, "Role 1", Set.of()),
-                        new RoleEntity(300L, "Role 12", Set.of()),
-                        new RoleEntity(200L, "Role 2", Set.of())))
+                        new RoleEntity(100L, "Role 1"),
+                        new RoleEntity(300L, "Role 12"),
+                        new RoleEntity(200L, "Role 2")))
                 .build());
 
     // when / then
@@ -178,7 +175,7 @@ public class RoleQueryControllerTest extends RestControllerTest {
         .bodyValue(
             """
             {
-              "sort":  [{"field": "name", "order":  "asc"}],
+              "sort":  [{"field": "name", "order":  "ASC"}],
               "page":  {"from":  20, "limit":  10}
             }
              """)

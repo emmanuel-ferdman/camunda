@@ -7,66 +7,60 @@
  */
 package io.camunda.exporter.rdbms;
 
-import io.camunda.db.rdbms.RdbmsService;
 import io.camunda.db.rdbms.write.RdbmsWriter;
 import io.camunda.db.rdbms.write.domain.ExporterPositionModel;
-import io.camunda.zeebe.exporter.api.Exporter;
-import io.camunda.zeebe.exporter.api.context.Context;
 import io.camunda.zeebe.exporter.api.context.Controller;
+import io.camunda.zeebe.exporter.api.context.ScheduledTask;
 import io.camunda.zeebe.protocol.record.Record;
 import io.camunda.zeebe.protocol.record.ValueType;
 import io.camunda.zeebe.util.VisibleForTesting;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** https://docs.camunda.io/docs/next/components/zeebe/technical-concepts/process-lifecycles/ */
-public class RdbmsExporter implements Exporter {
-
-  /** The partition on which all process deployments are published */
-  public static final long PROCESS_DEFINITION_PARTITION = 1L;
+public class RdbmsExporter {
 
   private static final Logger LOG = LoggerFactory.getLogger(RdbmsExporter.class);
 
-  private final HashMap<ValueType, List<RdbmsExportHandler>> registeredHandlers = new HashMap<>();
+  private final Map<ValueType, List<RdbmsExportHandler>> registeredHandlers;
+  private final Controller controller;
 
-  private Controller controller;
+  private final long partitionId;
+  private final RdbmsWriter rdbmsWriter;
 
-  private long partitionId;
-  private final RdbmsService rdbmsService;
-  private RdbmsWriter rdbmsWriter;
+  // configuration
+  private final Duration flushInterval;
+  private final int maxQueueSize;
 
+  // volatile runtime properties
   private ExporterPositionModel exporterRdbmsPosition;
   private long lastPosition = -1;
+  private ScheduledTask currentFlushTask = null;
 
-  public RdbmsExporter(final RdbmsService rdbmsService) {
-    this.rdbmsService = rdbmsService;
-  }
+  public RdbmsExporter(final RdbmsExporterConfig config) {
+    rdbmsWriter = config.rdbmsWriter();
+    controller = config.controller();
+    registeredHandlers = config.handlers();
 
-  @Override
-  public void configure(final Context context) {
-    partitionId = context.getPartitionId();
+    partitionId = config.partitionId();
+    flushInterval = config.flushInterval();
+    maxQueueSize = config.maxQueueSize();
 
-    rdbmsWriter = rdbmsService.createWriter(partitionId);
-    registerHandler();
-
-    LOG.info("[RDBMS Exporter] RDBMS Exporter configured!");
-  }
-
-  @Override
-  public void open(final Controller controller) {
-    this.controller = controller;
-    this.controller.scheduleCancellableTask(Duration.ofSeconds(5), this::flushAndReschedule);
+    if (!flushAfterEachRecord()) {
+      currentFlushTask =
+          controller.scheduleCancellableTask(flushInterval, this::flushAndReschedule);
+    }
 
     initializeRdbmsPosition();
     lastPosition = controller.getLastExportedRecordPosition();
     if (exporterRdbmsPosition.lastExportedPosition() > -1
         && lastPosition <= exporterRdbmsPosition.lastExportedPosition()) {
-      // This is needed since the brokers last exported position is from it's last snapshot and kann
-      // be different than ours.
+      // This is needed since the brokers last exported position is from its last snapshot and can
+      // be different from ours.
       lastPosition = exporterRdbmsPosition.lastExportedPosition();
       updatePositionInBroker();
     }
@@ -76,9 +70,12 @@ public class RdbmsExporter implements Exporter {
     LOG.info("[RDBMS Exporter] Exporter opened with last exported position {}", lastPosition);
   }
 
-  @Override
   public void close() {
     try {
+      if (currentFlushTask != null) {
+        currentFlushTask.cancel();
+      }
+
       rdbmsWriter.flush();
     } catch (final Exception e) {
       LOG.warn("[RDBMS Exporter] Failed to flush records before closing exporter.", e);
@@ -87,7 +84,6 @@ public class RdbmsExporter implements Exporter {
     LOG.info("[RDBMS Exporter] Exporter closed");
   }
 
-  @Override
   public void export(final Record<?> record) {
     LOG.debug(
         "[RDBMS Exporter] Process record {}-{} - {}:{}",
@@ -110,36 +106,24 @@ public class RdbmsExporter implements Exporter {
               handler.getClass(),
               record.getValueType());
         }
+
+        lastPosition = record.getPosition();
+
+        if (flushAfterEachRecord()) {
+          rdbmsWriter.flush();
+        }
       }
     } else {
       LOG.trace("[RDBMS Exporter] No registered handler found for {}", record.getValueType());
     }
-
-    lastPosition = record.getPosition();
   }
 
-  private void registerHandler() {
-    if (partitionId == PROCESS_DEFINITION_PARTITION) {
-      registeredHandlers.put(
-          ValueType.PROCESS,
-          List.of(new ProcessExportHandler(rdbmsWriter.getProcessDefinitionWriter())));
+  public void purge() {
+    if (currentFlushTask != null) {
+      currentFlushTask.cancel();
     }
-    registeredHandlers.put(
-        ValueType.DECISION,
-        List.of(new DecisionDefinitionExportHandler(rdbmsWriter.getDecisionDefinitionWriter())));
-    registeredHandlers.put(
-        ValueType.DECISION_REQUIREMENTS,
-        List.of(
-            new DecisionRequirementsExportHandler(rdbmsWriter.getDecisionRequirementsWriter())));
-    registeredHandlers.put(
-        ValueType.PROCESS_INSTANCE,
-        List.of(
-            new ProcessInstanceExportHandler(rdbmsWriter.getProcessInstanceWriter()),
-            new FlowNodeExportHandler(rdbmsWriter.getFlowNodeInstanceWriter())));
-    registeredHandlers.put(
-        ValueType.VARIABLE, List.of(new VariableExportHandler(rdbmsWriter.getVariableWriter())));
-    registeredHandlers.put(
-        ValueType.USER_TASK, List.of(new UserTaskExportHandler(rdbmsWriter.getUserTaskWriter())));
+
+    rdbmsWriter.getRdbmsPurger().purgeRdbms();
   }
 
   private void updatePositionInBroker() {
@@ -162,7 +146,6 @@ public class RdbmsExporter implements Exporter {
   }
 
   private void initializeRdbmsPosition() {
-
     try {
       exporterRdbmsPosition = rdbmsWriter.getExporterPositionService().findOne(partitionId);
     } catch (final Exception e) {
@@ -188,14 +171,22 @@ public class RdbmsExporter implements Exporter {
     }
   }
 
+  private boolean flushAfterEachRecord() {
+    return flushInterval.isZero() || maxQueueSize <= 0;
+  }
+
   private void flushAndReschedule() {
     flushExecutionQueue();
-    controller.scheduleCancellableTask(Duration.ofSeconds(5), this::flushAndReschedule);
+    currentFlushTask = controller.scheduleCancellableTask(flushInterval, this::flushAndReschedule);
   }
 
   @VisibleForTesting(
       "Each exporter creates it's own executionQueue, so we need an accessible flush method for tests")
   public void flushExecutionQueue() {
+    if (flushAfterEachRecord()) {
+      LOG.warn("Unnecessary flush called, since flush interval is zero or max queue size is zero");
+      return;
+    }
     LOG.debug("[RDBMS Exporter] flushing queue");
     rdbmsWriter.flush();
   }

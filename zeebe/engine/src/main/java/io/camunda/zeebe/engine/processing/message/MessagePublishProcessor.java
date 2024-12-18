@@ -7,7 +7,6 @@
  */
 package io.camunda.zeebe.engine.processing.message;
 
-import static io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior.UNAUTHORIZED_ERROR_MESSAGE;
 import static io.camunda.zeebe.util.buffer.BufferUtil.bufferAsString;
 
 import io.camunda.zeebe.engine.processing.bpmn.behavior.BpmnStateBehavior;
@@ -90,13 +89,16 @@ public final class MessagePublishProcessor implements TypedRecordProcessor<Messa
   @Override
   public void processRecord(final TypedRecord<MessageRecord> command) {
     final var authRequest =
-        new AuthorizationRequest(command, AuthorizationResourceType.MESSAGE, PermissionType.CREATE);
-    if (!authCheckBehavior.isAuthorized(authRequest)) {
-      final var error =
-          UNAUTHORIZED_ERROR_MESSAGE.formatted(
-              authRequest.getPermissionType(), authRequest.getResourceType());
-      rejectionWriter.appendRejection(command, RejectionType.UNAUTHORIZED, error);
-      responseWriter.writeRejectionOnCommand(command, RejectionType.UNAUTHORIZED, error);
+        new AuthorizationRequest(
+            command,
+            AuthorizationResourceType.MESSAGE,
+            PermissionType.CREATE,
+            command.getValue().getTenantId());
+    final var isAuthorized = authCheckBehavior.isAuthorized(authRequest);
+    if (isAuthorized.isLeft()) {
+      final var rejection = isAuthorized.getLeft();
+      rejectionWriter.appendRejection(command, rejection.type(), rejection.reason());
+      responseWriter.writeRejectionOnCommand(command, rejection.type(), rejection.reason());
       return;
     }
 

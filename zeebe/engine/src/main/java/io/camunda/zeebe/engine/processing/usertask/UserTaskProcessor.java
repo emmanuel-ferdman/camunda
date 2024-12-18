@@ -8,10 +8,10 @@
 package io.camunda.zeebe.engine.processing.usertask;
 
 import io.camunda.zeebe.engine.processing.ExcludeAuthorizationCheck;
+import io.camunda.zeebe.engine.processing.Rejection;
 import io.camunda.zeebe.engine.processing.bpmn.BpmnElementContext;
 import io.camunda.zeebe.engine.processing.bpmn.BpmnElementContextImpl;
 import io.camunda.zeebe.engine.processing.bpmn.behavior.BpmnBehaviors;
-import io.camunda.zeebe.engine.processing.bpmn.behavior.BpmnIncidentBehavior;
 import io.camunda.zeebe.engine.processing.bpmn.behavior.BpmnJobBehavior;
 import io.camunda.zeebe.engine.processing.deployment.model.element.ExecutableUserTask;
 import io.camunda.zeebe.engine.processing.deployment.model.element.TaskListener;
@@ -41,7 +41,10 @@ import java.util.Optional;
 public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
 
   private static final String USER_TASK_COMPLETION_REJECTION =
-      "Completion of the User Task with key '%d' was rejected by Task Listener";
+      "Completion of the User Task with key '%d' was denied by Task Listener";
+
+  private static final String USER_TASK_ASSIGNMENT_REJECTION =
+      "Assignment of the User Task with key '%d' was denied by Task Listener";
 
   private final UserTaskCommandProcessors commandProcessors;
   private final ProcessState processState;
@@ -49,7 +52,6 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
   private final ElementInstanceState elementInstanceState;
 
   private final BpmnJobBehavior jobBehavior;
-  private final BpmnIncidentBehavior incidentBehavior;
 
   private final TypedRejectionWriter rejectionWriter;
   private final TypedResponseWriter responseWriter;
@@ -70,7 +72,6 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
     elementInstanceState = state.getElementInstanceState();
 
     jobBehavior = bpmnBehaviors.jobBehavior();
-    incidentBehavior = bpmnBehaviors.incidentBehavior();
 
     rejectionWriter = writers.rejection();
     responseWriter = writers.response();
@@ -91,21 +92,34 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
   private void processCompleteTaskListener(final TypedRecord<UserTaskRecord> command) {
     final var lifecycleState = userTaskState.getLifecycleState(command.getKey());
     final var listenerEventType = mapLifecycleStateToEventType(lifecycleState);
-    final var persistedRecord = userTaskState.getUserTask(command.getKey());
-    final var userTaskElement = getUserTaskElement(persistedRecord);
-    final var userTaskElementInstance = getUserTaskElementInstance(persistedRecord);
+    // we need to copy the intermediate user task record as we have read it from the state, and we
+    // will read from the state again later, which in turn would modify this record
+    final var intermediateUserTaskRecord =
+        userTaskState.getIntermediateState(command.getKey()).getRecord().copy();
+    final var userTaskElement = getUserTaskElement(intermediateUserTaskRecord);
+    final var userTaskElementInstance = getUserTaskElementInstance(intermediateUserTaskRecord);
     final var context = buildContext(userTaskElementInstance);
+
+    if (!command.getValue().getChangedAttributes().isEmpty()) {
+      intermediateUserTaskRecord.wrapChangedAttributes(command.getValue(), true);
+      stateWriter.appendFollowUpEvent(
+          command.getKey(), UserTaskIntent.CORRECTED, intermediateUserTaskRecord);
+    }
 
     findNextTaskListener(listenerEventType, userTaskElement, userTaskElementInstance)
         .ifPresentOrElse(
-            listener -> createTaskListenerJob(listener, context, persistedRecord),
-            () -> finalizeCommand(command, lifecycleState, persistedRecord));
+            listener ->
+                jobBehavior.createNewTaskListenerJob(context, intermediateUserTaskRecord, listener),
+            () -> finalizeCommand(command, lifecycleState, intermediateUserTaskRecord));
   }
 
   private void finalizeCommand(
       final TypedRecord<UserTaskRecord> command,
       final LifecycleState lifecycleState,
       final UserTaskRecord userTaskRecord) {
+    final var currentUserTask = userTaskState.getUserTask(command.getKey());
+    userTaskRecord.setDiffAsChangedAttributes(currentUserTask);
+
     final var commandProcessor = determineProcessorFromUserTaskLifecycleState(lifecycleState);
     commandProcessor.onFinalizeCommand(command, userTaskRecord);
   }
@@ -114,13 +128,15 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
     final var lifecycleState = userTaskState.getLifecycleState(command.getKey());
     final var persistedRecord = userTaskState.getUserTask(command.getKey());
 
-    // Improvement: introduce switch case based on lifecycle stages in the future
-    if (lifecycleState == LifecycleState.COMPLETING) {
-      writeRejectionForCommand(command, persistedRecord, UserTaskIntent.COMPLETION_DENIED);
-    } else {
-      throw new IllegalArgumentException(
-          "Expected to reject operation for user task: '%d', but operation could not be determined from the task's current lifecycle state: '%s'"
-              .formatted(command.getValue().getUserTaskKey(), lifecycleState));
+    switch (lifecycleState) {
+      case COMPLETING ->
+          writeRejectionForCommand(command, persistedRecord, UserTaskIntent.COMPLETION_DENIED);
+      case ASSIGNING ->
+          writeRejectionForCommand(command, persistedRecord, UserTaskIntent.ASSIGNMENT_DENIED);
+      default ->
+          throw new IllegalArgumentException(
+              "Expected to reject operation for user task: '%d', but operation could not be determined from the task's current lifecycle state: '%s'"
+                  .formatted(command.getValue().getUserTaskKey(), lifecycleState));
     }
   }
 
@@ -132,8 +148,7 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
         .ifRightOrLeft(
             persistedRecord ->
                 handleCommandProcessing(commandProcessor, command, persistedRecord, intent),
-            violation ->
-                handleCommandRejection(command, violation.getLeft(), violation.getRight()));
+            rejection -> handleCommandRejection(command, rejection));
   }
 
   private void handleCommandProcessing(
@@ -142,7 +157,13 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
       final UserTaskRecord persistedRecord,
       final UserTaskIntent intent) {
 
-    processor.onCommand(command, persistedRecord);
+    // If a user-triggered command (ASSIGN, CLAIM, UPDATE, COMPLETE) lacks request metadata,
+    // it indicates the command was retried by the engine after resolving an incident caused
+    // by a task listener property expression evaluation failure. In this case, the `onCommand`
+    // method was already processed during the initial execution, so we can safely skip it now.
+    if (command.hasRequestMetadata()) {
+      processor.onCommand(command, persistedRecord);
+    }
 
     final var userTaskElement = getUserTaskElement(persistedRecord);
     final var eventType = mapIntentToEventType(intent);
@@ -165,13 +186,17 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
       final var listener = userTaskElement.getTaskListeners(eventType).getFirst();
       final var userTaskElementInstance = getUserTaskElementInstance(persistedRecord);
       final var context = buildContext(userTaskElementInstance);
-      createTaskListenerJob(listener, context, persistedRecord);
+      jobBehavior.createNewTaskListenerJob(context, persistedRecord, listener);
     } else {
       processor.onFinalizeCommand(command, persistedRecord);
     }
   }
 
   void storeUserTaskRecordRequestMetadata(final TypedRecord<UserTaskRecord> command) {
+    if (!command.hasRequestMetadata()) {
+      return;
+    }
+
     final var metadata =
         new UserTaskRecordRequestMetadata()
             .setIntent((UserTaskIntent) command.getIntent())
@@ -181,11 +206,9 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
   }
 
   private void handleCommandRejection(
-      final TypedRecord<UserTaskRecord> command,
-      final RejectionType rejectionType,
-      final String rejectionReason) {
-    rejectionWriter.appendRejection(command, rejectionType, rejectionReason);
-    responseWriter.writeRejectionOnCommand(command, rejectionType, rejectionReason);
+      final TypedRecord<UserTaskRecord> command, final Rejection rejection) {
+    rejectionWriter.appendRejection(command, rejection.type(), rejection.reason());
+    responseWriter.writeRejectionOnCommand(command, rejection.type(), rejection.reason());
   }
 
   private Optional<TaskListener> findNextTaskListener(
@@ -195,20 +218,6 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
     final var listeners = userTask.getTaskListeners(eventType);
     final int currentListenerIndex = userTaskElementInstance.getTaskListenerIndex(eventType);
     return listeners.stream().skip(currentListenerIndex).findFirst();
-  }
-
-  private void createTaskListenerJob(
-      final TaskListener listener,
-      final BpmnElementContext context,
-      final UserTaskRecord taskRecordValue) {
-    jobBehavior
-        .evaluateTaskListenerJobExpressions(
-            listener.getJobWorkerProperties(), context, taskRecordValue)
-        .thenDo(
-            listenerJobProperties ->
-                jobBehavior.createNewTaskListenerJob(
-                    context, listenerJobProperties, listener, taskRecordValue))
-        .ifLeft(failure -> incidentBehavior.createIncident(failure, context));
   }
 
   private void writeRejectionForCommand(
@@ -225,11 +234,11 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
         metadata -> {
           responseWriter.writeRejection(
               command.getKey(),
-              UserTaskIntent.COMPLETE,
+              mapDeniedIntentToResponseIntent(intent),
               command.getValue(),
               command.getValueType(),
               RejectionType.INVALID_STATE,
-              USER_TASK_COMPLETION_REJECTION.formatted(persistedRecord.getUserTaskKey()),
+              mapDeniedIntentToResponseRejectionReason(intent, persistedRecord.getUserTaskKey()),
               metadata.getRequestId(),
               metadata.getRequestStreamId());
         });
@@ -245,9 +254,9 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
 
   private ZeebeTaskListenerEventType mapIntentToEventType(final UserTaskIntent intent) {
     return switch (intent) {
-      case ASSIGN, CLAIM -> ZeebeTaskListenerEventType.assignment;
-      case UPDATE -> ZeebeTaskListenerEventType.update;
-      case COMPLETE -> ZeebeTaskListenerEventType.complete;
+      case ASSIGN, CLAIM -> ZeebeTaskListenerEventType.assigning;
+      case UPDATE -> ZeebeTaskListenerEventType.updating;
+      case COMPLETE -> ZeebeTaskListenerEventType.completing;
       default ->
           throw new IllegalArgumentException("Unexpected user task intent: '%s'".formatted(intent));
     };
@@ -256,14 +265,33 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
   private ZeebeTaskListenerEventType mapLifecycleStateToEventType(
       final LifecycleState lifecycleState) {
     return switch (lifecycleState) {
-      case CREATING -> ZeebeTaskListenerEventType.create;
-      case ASSIGNING -> ZeebeTaskListenerEventType.assignment;
-      case UPDATING -> ZeebeTaskListenerEventType.update;
-      case COMPLETING -> ZeebeTaskListenerEventType.complete;
-      case CANCELING -> ZeebeTaskListenerEventType.cancel;
+      case CREATING -> ZeebeTaskListenerEventType.creating;
+      case ASSIGNING, CLAIMING -> ZeebeTaskListenerEventType.assigning;
+      case UPDATING -> ZeebeTaskListenerEventType.updating;
+      case COMPLETING -> ZeebeTaskListenerEventType.completing;
+      case CANCELING -> ZeebeTaskListenerEventType.canceling;
       default ->
           throw new IllegalArgumentException(
               "Unexpected user task lifecycle state: '%s'".formatted(lifecycleState));
+    };
+  }
+
+  private UserTaskIntent mapDeniedIntentToResponseIntent(final UserTaskIntent intent) {
+    return switch (intent) {
+      case COMPLETION_DENIED -> UserTaskIntent.COMPLETE;
+      case ASSIGNMENT_DENIED -> UserTaskIntent.ASSIGN;
+      default ->
+          throw new IllegalArgumentException("Unexpected user task intent: '%s'".formatted(intent));
+    };
+  }
+
+  private String mapDeniedIntentToResponseRejectionReason(
+      final UserTaskIntent intent, final long userTaskKey) {
+    return switch (intent) {
+      case COMPLETION_DENIED -> USER_TASK_COMPLETION_REJECTION.formatted(userTaskKey);
+      case ASSIGNMENT_DENIED -> USER_TASK_ASSIGNMENT_REJECTION.formatted(userTaskKey);
+      default ->
+          throw new IllegalArgumentException("Unexpected user task intent: '%s'".formatted(intent));
     };
   }
 
@@ -273,6 +301,7 @@ public class UserTaskProcessor implements TypedRecordProcessor<UserTaskRecord> {
     final var userTaskIntent =
         switch (lifecycleState) {
           case ASSIGNING -> UserTaskIntent.ASSIGN;
+          case CLAIMING -> UserTaskIntent.CLAIM;
           case UPDATING -> UserTaskIntent.UPDATE;
           case COMPLETING -> UserTaskIntent.COMPLETE;
           case CREATING, CANCELING ->

@@ -10,6 +10,7 @@ package io.camunda.zeebe.engine.util;
 import static io.camunda.zeebe.test.util.record.RecordingExporter.jobRecords;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.camunda.security.configuration.SecurityConfiguration;
 import io.camunda.zeebe.db.DbKey;
 import io.camunda.zeebe.db.DbValue;
 import io.camunda.zeebe.engine.processing.EngineProcessors;
@@ -24,6 +25,7 @@ import io.camunda.zeebe.engine.util.client.ClockClient;
 import io.camunda.zeebe.engine.util.client.DecisionEvaluationClient;
 import io.camunda.zeebe.engine.util.client.DeploymentClient;
 import io.camunda.zeebe.engine.util.client.GroupClient;
+import io.camunda.zeebe.engine.util.client.IdentitySetupClient;
 import io.camunda.zeebe.engine.util.client.IncidentClient;
 import io.camunda.zeebe.engine.util.client.JobActivationClient;
 import io.camunda.zeebe.engine.util.client.JobClient;
@@ -45,6 +47,8 @@ import io.camunda.zeebe.protocol.Protocol;
 import io.camunda.zeebe.protocol.ZbColumnFamilies;
 import io.camunda.zeebe.protocol.impl.encoding.MsgPackConverter;
 import io.camunda.zeebe.protocol.record.Record;
+import io.camunda.zeebe.protocol.record.intent.CommandDistributionIntent;
+import io.camunda.zeebe.protocol.record.intent.IdentitySetupIntent;
 import io.camunda.zeebe.protocol.record.intent.JobIntent;
 import io.camunda.zeebe.protocol.record.value.JobRecordValue;
 import io.camunda.zeebe.protocol.record.value.TenantOwned;
@@ -88,6 +92,7 @@ public final class EngineRule extends ExternalResource {
   private final RecordingExporterTestWatcher recordingExporterTestWatcher =
       new RecordingExporterTestWatcher();
   private final int partitionCount;
+  private boolean awaitIdentitySetup = true;
 
   private Consumer<TypedRecord> onProcessedCallback = record -> {};
   private Consumer<LoggedEvent> onSkippedCallback = record -> {};
@@ -97,6 +102,7 @@ public final class EngineRule extends ExternalResource {
 
   private FeatureFlags featureFlags = FeatureFlags.createDefaultForTests();
   private ArrayList<TestInterPartitionCommandSender> interPartitionCommandSenders;
+  private Consumer<SecurityConfiguration> securityConfigModifier = cfg -> {};
 
   private EngineRule(final int partitionCount) {
     this(partitionCount, null);
@@ -131,6 +137,9 @@ public final class EngineRule extends ExternalResource {
   @Override
   protected void before() {
     start();
+    if (awaitIdentitySetup) {
+      awaitIdentitySetup();
+    }
   }
 
   public void start() {
@@ -143,6 +152,11 @@ public final class EngineRule extends ExternalResource {
 
   public void stop() {
     forEachPartition(environmentRule::closeStreamProcessor);
+  }
+
+  public EngineRule withoutAwaitingIdentitySetup() {
+    awaitIdentitySetup = false;
+    return this;
   }
 
   public EngineRule withJobStreamer(final JobStreamer jobStreamer) {
@@ -170,6 +184,11 @@ public final class EngineRule extends ExternalResource {
     return this;
   }
 
+  public EngineRule withSecurityConfig(final Consumer<SecurityConfiguration> modifier) {
+    securityConfigModifier = modifier;
+    return this;
+  }
+
   private void startProcessors(final StreamProcessorMode mode, final boolean awaitOpening) {
     interPartitionCommandSenders = new ArrayList<>();
 
@@ -180,17 +199,19 @@ public final class EngineRule extends ExternalResource {
           interPartitionCommandSenders.add(interPartitionCommandSender);
           environmentRule.startTypedStreamProcessor(
               partitionId,
-              (recordProcessorContext) ->
-                  EngineProcessors.createEngineProcessors(
-                          recordProcessorContext,
-                          partitionCount,
-                          new SubscriptionCommandSender(partitionId, interPartitionCommandSender),
-                          interPartitionCommandSender,
-                          featureFlags,
-                          jobStreamer)
-                      .withListener(
-                          new ProcessingExporterTransistor(
-                              environmentRule.getLogStream(partitionId))),
+              (recordProcessorContext) -> {
+                securityConfigModifier.accept(recordProcessorContext.getSecurityConfig());
+                return EngineProcessors.createEngineProcessors(
+                        recordProcessorContext,
+                        partitionCount,
+                        new SubscriptionCommandSender(partitionId, interPartitionCommandSender),
+                        interPartitionCommandSender,
+                        featureFlags,
+                        jobStreamer)
+                    .withListener(
+                        new ProcessingExporterTransistor(
+                            environmentRule.getLogStream(partitionId)));
+              },
               Optional.of(
                   new StreamProcessorListener() {
                     @Override
@@ -346,6 +367,10 @@ public final class EngineRule extends ExternalResource {
     return new UserClient(environmentRule);
   }
 
+  public IdentitySetupClient identitySetup() {
+    return new IdentitySetupClient(environmentRule);
+  }
+
   public AuthorizationClient authorization() {
     return new AuthorizationClient(environmentRule);
   }
@@ -449,6 +474,17 @@ public final class EngineRule extends ExternalResource {
                                   MsgPackConverter.convertToJson(value.getDirectBuffer())));
                   return entries;
                 }));
+  }
+
+  public void awaitIdentitySetup() {
+    if (partitionCount > 1) {
+      RecordingExporter.commandDistributionRecords(CommandDistributionIntent.FINISHED)
+          .withDistributionIntent(IdentitySetupIntent.INITIALIZE)
+          .await();
+    } else {
+      RecordingExporter.identitySetupRecords(IdentitySetupIntent.INITIALIZED).await();
+    }
+    RecordingExporter.reset();
   }
 
   public void awaitProcessingOf(final Record<?> record) {

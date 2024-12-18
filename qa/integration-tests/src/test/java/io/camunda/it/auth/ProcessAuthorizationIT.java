@@ -7,21 +7,21 @@
  */
 package io.camunda.it.auth;
 
-import static io.camunda.zeebe.client.protocol.rest.PermissionTypeEnum.CREATE;
-import static io.camunda.zeebe.client.protocol.rest.PermissionTypeEnum.READ;
-import static io.camunda.zeebe.client.protocol.rest.ResourceTypeEnum.DEPLOYMENT;
-import static io.camunda.zeebe.client.protocol.rest.ResourceTypeEnum.PROCESS_DEFINITION;
+import static io.camunda.client.protocol.rest.PermissionTypeEnum.CREATE;
+import static io.camunda.client.protocol.rest.PermissionTypeEnum.READ;
+import static io.camunda.client.protocol.rest.ResourceTypeEnum.DEPLOYMENT;
+import static io.camunda.client.protocol.rest.ResourceTypeEnum.PROCESS_DEFINITION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.camunda.application.Profile;
-import io.camunda.it.utils.BrokerWithCamundaExporterITInvocationProvider;
+import io.camunda.client.ZeebeClient;
+import io.camunda.client.api.command.ProblemException;
+import io.camunda.client.api.response.DeploymentEvent;
+import io.camunda.it.utils.BrokerITInvocationProvider;
 import io.camunda.it.utils.ZeebeClientTestFactory.Authenticated;
 import io.camunda.it.utils.ZeebeClientTestFactory.Permissions;
 import io.camunda.it.utils.ZeebeClientTestFactory.User;
-import io.camunda.zeebe.client.ZeebeClient;
-import io.camunda.zeebe.client.api.command.ProblemException;
-import io.camunda.zeebe.client.api.response.DeploymentEvent;
 import java.time.Duration;
 import java.util.List;
 import org.awaitility.Awaitility;
@@ -53,8 +53,9 @@ class ProcessAuthorizationIT {
                   PROCESS_DEFINITION, READ, List.of("service_tasks_v1", "service_tasks_v2"))));
 
   @RegisterExtension
-  static final BrokerWithCamundaExporterITInvocationProvider PROVIDER =
-      new BrokerWithCamundaExporterITInvocationProvider()
+  static final BrokerITInvocationProvider PROVIDER =
+      new BrokerITInvocationProvider()
+          .withoutRdbmsExporter()
           .withAdditionalProfiles(Profile.AUTH_BASIC)
           .withAuthorizationsEnabled()
           .withUsers(ADMIN_USER, RESTRICTED_USER);

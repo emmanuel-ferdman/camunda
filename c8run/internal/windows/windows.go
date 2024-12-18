@@ -8,11 +8,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"syscall"
 )
 
-func (w *WindowsC8Run) OpenBrowser() error {
-	operateUrl := "http://localhost:8080/operate/login"
+func (w *WindowsC8Run) OpenBrowser(protocol string, port int) error {
+	operateUrl := protocol + "://localhost:" + strconv.Itoa(port) + "/operate/login"
 	openBrowserCmdString := "start " + operateUrl
 	openBrowserCmd := exec.Command("cmd", "/C", openBrowserCmdString)
 	openBrowserCmd.SysProcAttr = &syscall.SysProcAttr{
@@ -45,7 +46,7 @@ func (w *WindowsC8Run) ElasticsearchCmd(elasticsearchVersion string, parentDir s
 }
 
 func (w *WindowsC8Run) ConnectorsCmd(javaBinary string, parentDir string, camundaVersion string) *exec.Cmd {
-	connectorsCmd := exec.Command(javaBinary, "-classpath", parentDir+"\\*;"+parentDir+"\\custom_connectors\\*;"+parentDir+"\\camunda-zeebe-"+camundaVersion+"\\lib\\*", "io.camunda.connector.runtime.app.ConnectorRuntimeApplication", "--spring.config.location="+parentDir+"\\connectors-application.properties")
+	connectorsCmd := exec.Command(javaBinary, "-classpath", parentDir+"\\*;"+parentDir+"\\custom_connectors\\*", "io.camunda.connector.runtime.app.ConnectorRuntimeApplication", "--spring.config.location="+parentDir+"\\connectors-application.properties")
 	connectorsCmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: 0x08000000 | 0x00000200, // CREATE_NO_WINDOW, CREATE_NEW_PROCESS_GROUP : https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
 		// CreationFlags: 0x00000008 | 0x00000200, // DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP : https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
@@ -54,8 +55,11 @@ func (w *WindowsC8Run) ConnectorsCmd(javaBinary string, parentDir string, camund
 	return connectorsCmd
 }
 
-func (w *WindowsC8Run) CamundaCmd(camundaVersion string, parentDir string, extraArgs string) *exec.Cmd {
+func (w *WindowsC8Run) CamundaCmd(camundaVersion string, parentDir string, extraArgs string, javaOpts string) *exec.Cmd {
 	camundaCmd := exec.Command(".\\camunda-zeebe-"+camundaVersion+"\\bin\\camunda.bat", extraArgs)
+	if javaOpts != "" {
+		camundaCmd.Env = append(os.Environ(), "JAVA_OPTS="+javaOpts)
+	}
 	camundaCmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: 0x08000000 | 0x00000200, // CREATE_NO_WINDOW, CREATE_NEW_PROCESS_GROUP : https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
 		// CreationFlags: 0x00000008 | 0x00000200, // DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP : https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags

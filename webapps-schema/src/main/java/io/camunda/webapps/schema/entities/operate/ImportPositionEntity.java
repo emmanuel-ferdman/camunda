@@ -7,6 +7,7 @@
  */
 package io.camunda.webapps.schema.entities.operate;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.camunda.webapps.schema.entities.AbstractExporterEntity;
 import java.util.Objects;
 
@@ -20,6 +21,7 @@ public class ImportPositionEntity extends AbstractExporterEntity<ImportPositionE
 
   private long sequence;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Long postImporterPosition;
 
   private String indexName;
@@ -30,14 +32,15 @@ public class ImportPositionEntity extends AbstractExporterEntity<ImportPositionE
       final long sequence,
       final ImportPositionEntity importPositionEntity,
       final long newPosition,
-      final String indexName) {
+      final String indexName,
+      final boolean completed) {
     return new ImportPositionEntity()
         .setSequence(sequence)
         .setAliasName(importPositionEntity.getAliasName())
         .setPartitionId(importPositionEntity.getPartitionId())
         .setIndexName(indexName)
         .setPosition(newPosition)
-        .setCompleted(false);
+        .setCompleted(completed);
   }
 
   public String getAliasName() {
@@ -156,6 +159,8 @@ public class ImportPositionEntity extends AbstractExporterEntity<ImportPositionE
         + postImporterPosition
         + ", indexName='"
         + indexName
+        + ", completed='"
+        + completed
         + '\''
         + '}';
   }

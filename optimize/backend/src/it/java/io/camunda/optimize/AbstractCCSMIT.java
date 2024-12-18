@@ -12,6 +12,8 @@ import static io.camunda.optimize.util.ZeebeBpmnModels.USER_TASK;
 import static io.camunda.zeebe.protocol.record.intent.UserTaskIntent.ASSIGNED;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.camunda.client.api.response.Process;
+import io.camunda.client.api.response.ProcessInstanceEvent;
 import io.camunda.optimize.dto.optimize.ProcessInstanceDto;
 import io.camunda.optimize.dto.optimize.query.process.FlowNodeInstanceDto;
 import io.camunda.optimize.dto.zeebe.ZeebeRecordDto;
@@ -27,8 +29,6 @@ import io.camunda.optimize.service.importing.engine.service.zeebe.ZeebeUserTaskI
 import io.camunda.optimize.test.it.extension.IntegrationTestConfigurationUtil;
 import io.camunda.optimize.test.it.extension.ZeebeExtension;
 import io.camunda.optimize.test.it.extension.db.TermsQueryContainer;
-import io.camunda.zeebe.client.api.response.Process;
-import io.camunda.zeebe.client.api.response.ProcessInstanceEvent;
 import io.camunda.zeebe.model.bpmn.Bpmn;
 import io.camunda.zeebe.model.bpmn.BpmnModelInstance;
 import io.camunda.zeebe.protocol.record.intent.Intent;
@@ -40,6 +40,7 @@ import java.io.InputStream;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -93,6 +94,17 @@ public abstract class AbstractCCSMIT extends AbstractIT {
     return zeebeVersionPattern
         .matcher(IntegrationTestConfigurationUtil.getZeebeDockerVersion())
         .matches();
+  }
+
+  protected static boolean isZeebeVersion87OrLater() {
+    final Pattern zeebeVersionPattern = Pattern.compile("8.([7-9]|\\d{2,})");
+    return zeebeVersionPattern
+        .matcher(IntegrationTestConfigurationUtil.getZeebeDockerVersion())
+        .matches();
+  }
+
+  protected static boolean isZeebeVersionSnapshot() {
+    return IntegrationTestConfigurationUtil.getZeebeDockerVersion().equalsIgnoreCase("snapshot");
   }
 
   protected static boolean isZeebeVersionWithMultiTenancy() {
@@ -321,6 +333,18 @@ public abstract class AbstractCCSMIT extends AbstractIT {
         Instant.ofEpochMilli(startOfElement.getTimestamp()), ZoneId.systemDefault());
   }
 
+  protected OffsetDateTime getTimestampForLastZeebeEventsWithIntent(
+      final List<? extends ZeebeRecordDto> eventsForElement, final Intent intent) {
+    final ZeebeRecordDto startOfElement =
+        eventsForElement.stream()
+            .filter(event -> event.getIntent().equals(intent))
+            .sorted(Comparator.comparing(ZeebeRecordDto::getTimestamp))
+            .reduce((first, second) -> second)
+            .orElseThrow(eventNotFoundExceptionSupplier);
+    return OffsetDateTime.ofInstant(
+        Instant.ofEpochMilli(startOfElement.getTimestamp()), ZoneId.systemDefault());
+  }
+
   protected OffsetDateTime getTimestampForZeebeAssignEvents(
       final List<? extends ZeebeRecordDto> eventsForElement, final String assigneeId) {
     final ZeebeRecordDto startOfElement =
@@ -333,6 +357,24 @@ public abstract class AbstractCCSMIT extends AbstractIT {
                             .getAssignee()
                             .equals(assigneeId))
             .findFirst()
+            .orElseThrow(eventNotFoundExceptionSupplier);
+    return OffsetDateTime.ofInstant(
+        Instant.ofEpochMilli(startOfElement.getTimestamp()), ZoneId.systemDefault());
+  }
+
+  protected OffsetDateTime getTimestampForZeebeLastAssignedEvents(
+      final List<? extends ZeebeRecordDto> eventsForElement, final String assigneeId) {
+    final ZeebeRecordDto startOfElement =
+        eventsForElement.stream()
+            .filter(
+                event ->
+                    event.getIntent().equals(ASSIGNED)
+                        && ((ZeebeUserTaskRecordDto) event)
+                            .getValue()
+                            .getAssignee()
+                            .equals(assigneeId))
+            .sorted(Comparator.comparing(ZeebeRecordDto::getTimestamp))
+            .reduce((first, second) -> second)
             .orElseThrow(eventNotFoundExceptionSupplier);
     return OffsetDateTime.ofInstant(
         Instant.ofEpochMilli(startOfElement.getTimestamp()), ZoneId.systemDefault());

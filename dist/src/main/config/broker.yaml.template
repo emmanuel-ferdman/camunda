@@ -34,10 +34,6 @@
 # This setting can also be overridden using the environment variable CAMUNDA_REST_ENABLED.
 # camunda.rest.enabled: true
 
-# Enable the Camunda REST Query API to start on broker startup.
-# This setting can also be overridden using the environment variable CAMUNDA_REST_QUERY_ENABLED.
-# camunda.rest.query.enabled: false
-
 # zeebe:
   # broker:
     # gateway:
@@ -81,6 +77,23 @@
       # Sets the maximum size of the incoming and outgoing messages (i.e. commands and events).
       # This setting can also be overridden using the environment variable ZEEBE_BROKER_NETWORK_MAXMESSAGESIZE.
       # maxMessageSize: 4MB
+
+      # Sets the size of the socket receive buffer (SO_RCVBUF).
+      # This setting can also be overridden using the environment variable ZEEBE_BROKER_NETWORK_SOCKETRECEIVEBUFFER.
+      # socketReceiveBuffer: 1MB
+
+      # Sets the size of the socket send buffer (SO_SNDBUF).
+      # This setting can also be overridden using the environment variable ZEEBE_BROKER_NETWORK_SOCKETSENDBUFFER.
+      # socketSendBuffer: 1MB
+
+      # Connections that did not receive any message within the specified timeout will be closed.
+      # This setting can also be overridden using the environment variable ZEEBE_BROKER_NETWORK_HEARTBEATTIMEOUT.
+      # heartbeatTimeout: 15s
+
+      # Sends a heartbeat when no other data is sent over an open connection within the specified timeout.
+      # This is to ensure that the connection is kept open.
+      # This setting can also be overridden using the environment variable ZEEBE_BROKER_NETWORK_HEARTBEATINTERVAL.
+      # heartbeatInterval: 5s
 
       # security:
         # Enables TLS authentication between this gateway and other nodes in the cluster
@@ -954,6 +967,12 @@
       # Be aware that all configuration's which are part of the experimental section
       # are subject to change and can be dropped at any time.
       # It might be that also some of them are actually dangerous so be aware when you change one of these!
+
+      # Toggles the version check restriction, used for migration. Useful for testing migration logic on
+      # snapshot or alpha versions. Default: True, means it is not allowed to migrate to incompatible version
+      # like: SNAPSHOT or alpha.
+      # This setting can also be overridden using the environment variable ZEEBE_BROKER_EXPERIMENTAL_VERSIONCHECKRESTRICTIONENABLED
+      # versionCheckRestrictionEnabled = true
 
       # Sets the maximum of appends which are send per follower.
       # This setting can also be overridden using the environment variable ZEEBE_BROKER_EXPERIMENTAL_MAXAPPENDSPERFOLLOWER

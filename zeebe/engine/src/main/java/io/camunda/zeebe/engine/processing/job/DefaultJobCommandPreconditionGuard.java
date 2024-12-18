@@ -7,8 +7,6 @@
  */
 package io.camunda.zeebe.engine.processing.job;
 
-import static io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior.UNAUTHORIZED_ERROR_MESSAGE_WITH_RESOURCE;
-
 import io.camunda.zeebe.engine.processing.Rejection;
 import io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior;
 import io.camunda.zeebe.engine.processing.identity.AuthorizationCheckBehavior.AuthorizationRequest;
@@ -16,7 +14,6 @@ import io.camunda.zeebe.engine.processing.streamprocessor.CommandProcessor.Comma
 import io.camunda.zeebe.engine.state.immutable.JobState;
 import io.camunda.zeebe.engine.state.immutable.JobState.State;
 import io.camunda.zeebe.protocol.impl.record.value.job.JobRecord;
-import io.camunda.zeebe.protocol.record.RejectionType;
 import io.camunda.zeebe.protocol.record.value.AuthorizationResourceType;
 import io.camunda.zeebe.protocol.record.value.PermissionType;
 import io.camunda.zeebe.stream.api.records.TypedRecord;
@@ -50,10 +47,14 @@ public final class DefaultJobCommandPreconditionGuard {
       final List<JobCommandCheck> customChecks) {
     this.state = state;
     this.acceptCommand = acceptCommand;
+    this.authCheckBehavior = authCheckBehavior;
     preconditionChecker =
         new JobCommandPreconditionChecker(
-            state, intent, List.of(State.ACTIVATABLE, State.ACTIVATED), customChecks);
-    this.authCheckBehavior = authCheckBehavior;
+            state,
+            intent,
+            List.of(State.ACTIVATABLE, State.ACTIVATED),
+            customChecks,
+            authCheckBehavior);
   }
 
   public boolean onCommand(
@@ -79,17 +80,6 @@ public final class DefaultJobCommandPreconditionGuard {
                 AuthorizationResourceType.PROCESS_DEFINITION,
                 PermissionType.UPDATE_PROCESS_INSTANCE)
             .addResourceId(job.getBpmnProcessId());
-
-    if (authCheckBehavior.isAuthorized(request)) {
-      return Either.right(job);
-    }
-
-    return Either.left(
-        new Rejection(
-            RejectionType.UNAUTHORIZED,
-            UNAUTHORIZED_ERROR_MESSAGE_WITH_RESOURCE.formatted(
-                request.getPermissionType(),
-                request.getResourceType(),
-                "BPMN process id '%s'".formatted(job.getBpmnProcessId()))));
+    return authCheckBehavior.isAuthorized(request).map(unused -> job);
   }
 }

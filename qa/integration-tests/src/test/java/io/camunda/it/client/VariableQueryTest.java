@@ -10,10 +10,10 @@ package io.camunda.it.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.camunda.client.ZeebeClient;
+import io.camunda.client.api.command.ProblemException;
+import io.camunda.client.api.search.response.Variable;
 import io.camunda.qa.util.cluster.TestStandaloneCamunda;
-import io.camunda.zeebe.client.ZeebeClient;
-import io.camunda.zeebe.client.api.command.ProblemException;
-import io.camunda.zeebe.client.api.search.response.Variable;
 import io.camunda.zeebe.model.bpmn.Bpmn;
 import io.camunda.zeebe.qa.util.junit.ZeebeIntegration;
 import io.camunda.zeebe.qa.util.junit.ZeebeIntegration.TestZeebe;
@@ -367,6 +367,21 @@ class VariableQueryTest {
         result.items().stream().map(item -> item.getValue()).collect(Collectors.toList());
 
     assertThat(values).isSortedAccordingTo(Comparator.reverseOrder());
+  }
+
+  @Test
+  void shouldSearchByFromWithLimit() {
+    // when
+    final var resultAll = camundaClient.newVariableQuery().send().join();
+    final var thirdKey = resultAll.items().get(2).getVariableKey();
+
+    final var resultSearchFrom =
+        camundaClient.newVariableQuery().page(p -> p.limit(2).from(2)).send().join();
+
+    // then
+    assertThat(resultSearchFrom.items().size()).isEqualTo(2);
+    assertThat(resultSearchFrom.items().stream().findFirst().get().getVariableKey())
+        .isEqualTo(thirdKey);
   }
 
   private static void waitForTasksBeingExported() {

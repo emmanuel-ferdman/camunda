@@ -23,8 +23,8 @@ import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
-import io.camunda.zeebe.client.CredentialsProvider;
-import io.camunda.zeebe.client.impl.oauth.OAuthCredentialsProvider;
+import io.camunda.client.CredentialsProvider;
+import io.camunda.client.impl.oauth.OAuthCredentialsProvider;
 import io.camunda.zeebe.spring.client.configuration.JsonMapperConfiguration;
 import io.camunda.zeebe.spring.client.configuration.ZeebeClientConfigurationImpl;
 import io.camunda.zeebe.spring.client.jobhandling.ZeebeClientExecutorService;
@@ -107,6 +107,9 @@ public class CredentialsProviderSelfManagedTest {
                             .put("expires_in", 300))));
 
     credentialsProvider.applyCredentials(headers::put);
-    assertThat(headers).isEqualTo(Map.of("Authorization", "Bearer " + ACCESS_TOKEN));
+    credentialsProvider.applyCredentials(headers::put);
+    assertThat(credentialsProvider).isExactlyInstanceOf(OAuthCredentialsProvider.class);
+    assertThat(headers).containsEntry("Authorization", "Bearer " + ACCESS_TOKEN);
+    assertThat(headers).hasSize(1);
   }
 }

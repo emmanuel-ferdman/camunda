@@ -9,20 +9,25 @@ package io.camunda.tasklist.webapp.es;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import io.camunda.tasklist.entities.TaskEntity;
-import io.camunda.tasklist.entities.TaskState;
-import io.camunda.tasklist.webapp.graphql.entity.UserDTO;
+import io.camunda.tasklist.webapp.dto.UserDTO;
 import io.camunda.tasklist.webapp.rest.exception.InvalidRequestException;
+import io.camunda.tasklist.webapp.security.TasklistAuthenticationUtil;
 import io.camunda.tasklist.webapp.security.UserReader;
+import io.camunda.webapps.schema.entities.tasklist.TaskEntity;
+import io.camunda.webapps.schema.entities.tasklist.TaskState;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
@@ -34,11 +39,24 @@ public class TaskValidatorTest {
 
   @InjectMocks private TaskValidator instance;
 
+  private MockedStatic<TasklistAuthenticationUtil> authenticationUtil;
+
+  @BeforeEach
+  public void setUp() {
+    authenticationUtil = mockStatic(TasklistAuthenticationUtil.class);
+  }
+
+  @AfterEach
+  public void tearDown() {
+    authenticationUtil.close();
+  }
+
   @ParameterizedTest
   @EnumSource(
       value = TaskState.class,
       names = {"COMPLETED", "CANCELED"})
-  public void userShouldNotBeAbleToPersistDraftTaskVariablesIfTaskIsNotActive(TaskState taskState) {
+  public void userShouldNotBeAbleToPersistDraftTaskVariablesIfTaskIsNotActive(
+      final TaskState taskState) {
     // given
     final TaskEntity task = new TaskEntity().setAssignee(TEST_USER).setState(taskState);
 
@@ -52,8 +70,8 @@ public class TaskValidatorTest {
   @Test
   public void userCanNotPersistDraftTaskVariablesIfAssignedToAnotherPerson() {
     // given
-    final UserDTO user =
-        new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER).setApiUser(false);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(false);
+    final UserDTO user = new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER);
     when(userReader.getCurrentUser()).thenReturn(user);
     final TaskEntity task =
         new TaskEntity().setAssignee("AnotherTestUser").setState(TaskState.CREATED);
@@ -67,9 +85,7 @@ public class TaskValidatorTest {
   @Test
   public void userCanNotPersistDraftTaskVariablesIfAssigneeIsNull() {
     // given
-    final UserDTO user =
-        new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER).setApiUser(false);
-    when(userReader.getCurrentUser()).thenReturn(user);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(false);
     final TaskEntity task = new TaskEntity().setAssignee(null).setState(TaskState.CREATED);
 
     // when - then
@@ -81,8 +97,8 @@ public class TaskValidatorTest {
   @Test
   public void userCanPersistDraftTaskVariablesWhenTaskIsAssignedToItself() {
     // given
-    final UserDTO user =
-        new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER).setApiUser(false);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(false);
+    final UserDTO user = new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER);
     when(userReader.getCurrentUser()).thenReturn(user);
     final TaskEntity task = new TaskEntity().setAssignee(TEST_USER).setState(TaskState.CREATED);
 
@@ -93,9 +109,7 @@ public class TaskValidatorTest {
   @Test
   public void apiUserShouldBeAbleToPersistDraftTaskVariablesEvenIfTaskIsAssignedToAnotherPerson() {
     // given
-    final UserDTO user =
-        new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER).setApiUser(true);
-    when(userReader.getCurrentUser()).thenReturn(user);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(true);
     final TaskEntity task =
         new TaskEntity().setAssignee("AnotherTestUser").setState(TaskState.CREATED);
 
@@ -107,7 +121,7 @@ public class TaskValidatorTest {
   @EnumSource(
       value = TaskState.class,
       names = {"COMPLETED", "CANCELED"})
-  public void userShouldNotBeAbleToCompleteIfTaskIsNotActive(TaskState taskState) {
+  public void userShouldNotBeAbleToCompleteIfTaskIsNotActive(final TaskState taskState) {
     // given
     final TaskEntity task = new TaskEntity().setAssignee(TEST_USER).setState(taskState);
 
@@ -121,8 +135,8 @@ public class TaskValidatorTest {
   @Test
   public void userCanNotCompleteTaskIfAssignedToAnotherPerson() {
     // given
-    final UserDTO user =
-        new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER).setApiUser(false);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(false);
+    final UserDTO user = new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER);
     when(userReader.getCurrentUser()).thenReturn(user);
     final TaskEntity task =
         new TaskEntity().setAssignee("AnotherTestUser").setState(TaskState.CREATED);
@@ -136,9 +150,7 @@ public class TaskValidatorTest {
   @Test
   public void userCanNotCompleteTaskIfAssigneeIsNull() {
     // given
-    final UserDTO user =
-        new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER).setApiUser(false);
-    when(userReader.getCurrentUser()).thenReturn(user);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(false);
     final TaskEntity task = new TaskEntity().setAssignee(null).setState(TaskState.CREATED);
 
     // when - then
@@ -150,8 +162,8 @@ public class TaskValidatorTest {
   @Test
   public void userCanCompleteTheirOwnTask() {
     // given
-    final UserDTO user =
-        new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER).setApiUser(false);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(false);
+    final UserDTO user = new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER);
     when(userReader.getCurrentUser()).thenReturn(user);
     final TaskEntity task = new TaskEntity().setAssignee(TEST_USER).setState(TaskState.CREATED);
 
@@ -162,9 +174,7 @@ public class TaskValidatorTest {
   @Test
   public void apiUserShouldBeAbleToCompleteOtherPersonTask() {
     // given
-    final UserDTO user =
-        new UserDTO().setUserId(TEST_USER).setDisplayName(TEST_USER).setApiUser(true);
-    when(userReader.getCurrentUser()).thenReturn(user);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(true);
     final TaskEntity task =
         new TaskEntity().setAssignee("AnotherTestUser").setState(TaskState.CREATED);
 
@@ -175,8 +185,7 @@ public class TaskValidatorTest {
   @Test
   public void apiUserShouldBeAbleToAssignToDifferentUsers() {
     // given
-    final UserDTO user = getTestUser().setApiUser(true);
-    when(userReader.getCurrentUser()).thenReturn(user);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(true);
     final TaskEntity taskBefore = new TaskEntity().setAssignee(null).setState(TaskState.CREATED);
 
     // when - then
@@ -186,8 +195,7 @@ public class TaskValidatorTest {
   @Test
   public void apiUserShouldBeAbleToReassignToAnotherUser() {
     // given
-    final UserDTO user = getTestUser().setApiUser(true);
-    when(userReader.getCurrentUser()).thenReturn(user);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(true);
     final TaskEntity taskBefore =
         new TaskEntity().setAssignee("previously assigned user").setState(TaskState.CREATED);
 
@@ -198,8 +206,7 @@ public class TaskValidatorTest {
   @Test
   public void apiUserShouldBeAbleToReassignToAnotherUserWhenOverrideAllowed() {
     // given
-    final UserDTO user = getTestUser().setApiUser(true);
-    when(userReader.getCurrentUser()).thenReturn(user);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(true);
     final TaskEntity taskBefore =
         new TaskEntity().setAssignee("previously assigned user").setState(TaskState.CREATED);
 
@@ -210,8 +217,7 @@ public class TaskValidatorTest {
   @Test
   public void apiUserShouldNoBeAbleToReassignToAnotherUserWhenOverrideForbidden() {
     // given
-    final UserDTO user = getTestUser().setApiUser(true);
-    when(userReader.getCurrentUser()).thenReturn(user);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(true);
     final TaskEntity taskBefore =
         new TaskEntity().setAssignee("previously assigned user").setState(TaskState.CREATED);
 
@@ -225,7 +231,7 @@ public class TaskValidatorTest {
   @EnumSource(
       value = TaskState.class,
       names = {"COMPLETED", "CANCELED"})
-  public void userShouldNotBeAbleToClaimTaskIfTaskIsNotActive(TaskState taskState) {
+  public void userShouldNotBeAbleToClaimTaskIfTaskIsNotActive(final TaskState taskState) {
     // given
     final TaskEntity task = new TaskEntity().setAssignee("AnotherTestUser").setState(taskState);
 
@@ -238,8 +244,7 @@ public class TaskValidatorTest {
   @Test
   public void nonApiUserShouldNotBeAbleToReassignToAnotherUser() {
     // given
-    final UserDTO user = getTestUser().setApiUser(false);
-    when(userReader.getCurrentUser()).thenReturn(user);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(false);
     final TaskEntity task =
         new TaskEntity().setAssignee("AnotherTestUser").setState(TaskState.CREATED);
 
@@ -253,8 +258,7 @@ public class TaskValidatorTest {
   @Test
   public void nonApiUserShouldNotBeAbleToReassignToAnotherUserWhenOverrideAllowed() {
     // given
-    final UserDTO user = getTestUser().setApiUser(false);
-    when(userReader.getCurrentUser()).thenReturn(user);
+    authenticationUtil.when(TasklistAuthenticationUtil::isApiUser).thenReturn(false);
     final TaskEntity task =
         new TaskEntity().setAssignee("AnotherTestUser").setState(TaskState.CREATED);
 
@@ -280,7 +284,7 @@ public class TaskValidatorTest {
   @EnumSource(
       value = TaskState.class,
       names = {"COMPLETED", "CANCELED"})
-  public void userShouldNotBeAbleToUnassignTaskIfTaskIsNotActive(TaskState taskState) {
+  public void userShouldNotBeAbleToUnassignTaskIfTaskIsNotActive(final TaskState taskState) {
     // given
     final TaskEntity task = new TaskEntity().setAssignee("AnotherTestUser").setState(taskState);
 

@@ -10,6 +10,8 @@ package io.camunda.tasklist.qa.backup;
 import static io.camunda.tasklist.qa.util.ContainerVersionsUtil.ZEEBE_CURRENTVERSION_DOCKER_PROPERTY_NAME;
 import static io.camunda.tasklist.util.CollectionUtil.asMap;
 
+import io.camunda.client.ZeebeClient;
+import io.camunda.client.ZeebeClientBuilder;
 import io.camunda.tasklist.CommonUtils;
 import io.camunda.tasklist.exceptions.TasklistRuntimeException;
 import io.camunda.tasklist.qa.backup.generator.BackupRestoreDataGenerator;
@@ -17,8 +19,6 @@ import io.camunda.tasklist.qa.util.ContainerVersionsUtil;
 import io.camunda.tasklist.qa.util.TestContainerUtil;
 import io.camunda.tasklist.qa.util.TestUtil;
 import io.camunda.webapps.backup.TakeBackupResponseDto;
-import io.camunda.zeebe.client.ZeebeClient;
-import io.camunda.zeebe.client.ZeebeClientBuilder;
 import java.io.IOException;
 import java.util.List;
 import org.apache.http.HttpHost;
@@ -158,7 +158,7 @@ public class BackupRestoreTest {
   private void startTasklist() {
     testContainerUtil.startTasklistContainer(tasklistContainer, VERSION, testContext);
     LOGGER.info("************ Tasklist started  ************");
-    testContext.setTasklistRestClient(tasklistAPICaller.createGraphQLTestTemplate(testContext));
+    tasklistAPICaller.createRestContext(testContext);
   }
 
   private void stopTasklist() {
@@ -289,7 +289,7 @@ public class BackupRestoreTest {
 @ComponentScan(
     basePackages = {
       "io.camunda.tasklist.qa.backup",
-      "io.camunda.tasklist.webapp.graphql.entity",
+      "io.camunda.tasklist.webapp.dto",
       "io.camunda.tasklist.qa.util.rest"
     })
 class TestConfig {}

@@ -10,8 +10,16 @@ package io.camunda.tasklist.schema;
 import static io.camunda.tasklist.property.TasklistProperties.ELASTIC_SEARCH;
 
 import io.camunda.tasklist.property.TasklistProperties;
+import io.camunda.tasklist.schema.indices.UserIndex;
+import io.camunda.webapps.schema.descriptors.operate.index.ProcessIndex;
+import io.camunda.webapps.schema.descriptors.operate.template.FlowNodeInstanceTemplate;
+import io.camunda.webapps.schema.descriptors.operate.template.VariableTemplate;
 import io.camunda.webapps.schema.descriptors.tasklist.index.FormIndex;
+import io.camunda.webapps.schema.descriptors.tasklist.index.TasklistImportPositionIndex;
+import io.camunda.webapps.schema.descriptors.tasklist.index.TasklistMetricIndex;
 import io.camunda.webapps.schema.descriptors.tasklist.template.DraftTaskVariableTemplate;
+import io.camunda.webapps.schema.descriptors.tasklist.template.SnapshotTaskVariableTemplate;
+import io.camunda.webapps.schema.descriptors.tasklist.template.TaskTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -32,6 +40,53 @@ public class TasklistIndexTemplateDescriptorsConfigurator {
   @Bean
   public FormIndex formIndex() {
     return new FormIndex(getIndexPrefix(tasklistProperties), isElasticsearch(tasklistProperties));
+  }
+
+  @Bean
+  public TasklistMetricIndex tasklistMetricIndex() {
+    return new TasklistMetricIndex(
+        getIndexPrefix(tasklistProperties), isElasticsearch(tasklistProperties));
+  }
+
+  @Bean("tasklistSnapshotTaskVariableTemplate")
+  public SnapshotTaskVariableTemplate snapshotTaskVariableTemplate() {
+    return new SnapshotTaskVariableTemplate(
+        getIndexPrefix(tasklistProperties), isElasticsearch(tasklistProperties));
+  }
+
+  @Bean
+  public TaskTemplate taskTemplate() {
+    return new TaskTemplate(
+        getIndexPrefix(tasklistProperties), isElasticsearch(tasklistProperties));
+  }
+
+  @Bean("tasklistVariableTemplate")
+  public VariableTemplate tasklistVariableTemplate() {
+    return new VariableTemplate(
+        getIndexPrefix(tasklistProperties), isElasticsearch(tasklistProperties));
+  }
+
+  @Bean("tasklistFlowNodeInstanceTemplate")
+  public FlowNodeInstanceTemplate flowNodeInstanceTemplate() {
+    return new FlowNodeInstanceTemplate(
+        getIndexPrefix(tasklistProperties), isElasticsearch(tasklistProperties));
+  }
+
+  @Bean
+  public UserIndex userIndex() {
+    return new UserIndex(getIndexPrefix(tasklistProperties), isElasticsearch(tasklistProperties));
+  }
+
+  @Bean
+  public TasklistImportPositionIndex tasklistImportPositionIndex() {
+    return new TasklistImportPositionIndex(
+        getIndexPrefix(tasklistProperties), isElasticsearch(tasklistProperties));
+  }
+
+  @Bean("tasklistProcessIndex")
+  public ProcessIndex processIndex() {
+    return new ProcessIndex(
+        getIndexPrefix(tasklistProperties), isElasticsearch(tasklistProperties));
   }
 
   private boolean isElasticsearch(final TasklistProperties tasklistProperties) {
