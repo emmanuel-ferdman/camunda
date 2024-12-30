@@ -90,9 +90,10 @@ import org.springframework.web.client.RestTemplate;
       "camunda.tasklist.csrf-prevention-enabled=false",
       TasklistProperties.PREFIX + ".importer.startLoadingDataOnStartup = false",
       TasklistProperties.PREFIX + ".archiver.rolloverEnabled = false",
+      TasklistProperties.PREFIX + ".zeebe.compatibility.enabled = true"
     },
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@ActiveProfiles({SSO_AUTH_PROFILE, "tasklist", "test"})
+@ActiveProfiles({SSO_AUTH_PROFILE, "tasklist", "test", "standalone"})
 public class AuthenticationIT implements AuthenticationTestable {
 
   public static final SalesPlan TASKLIST_TEST_SALESPLAN = new SalesPlan("test");

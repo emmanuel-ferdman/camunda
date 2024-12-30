@@ -37,14 +37,14 @@ public class BackupServiceImpl implements BackupService {
   public BackupServiceImpl(
       final Executor threadPoolTaskExecutor,
       final BackupPriorities backupPriorities,
-      final BackupRepositoryProps operateProperties,
+      final BackupRepositoryProps backupProps,
       final BackupRepository repository,
       final DynamicIndicesProvider dynamicIndicesProvider) {
     this.threadPoolTaskExecutor = threadPoolTaskExecutor;
     this.backupPriorities = backupPriorities;
     indexPatternsOrdered = backupPriorities.indicesSplitBySnapshot().toList();
     this.repository = repository;
-    backupProps = operateProperties;
+    this.backupProps = backupProps;
     this.dynamicIndicesProvider = dynamicIndicesProvider;
   }
 
@@ -99,9 +99,8 @@ public class BackupServiceImpl implements BackupService {
       final String snapshotName = repository.snapshotNameProvider().getSnapshotName(metadata);
       // Add all the dynamic indices in the last step
       if (index == count) {
-        final var indexPatternList = new ArrayList<>(indexCollection.indices());
-        indexPatternList.addAll(dynamicIndicesProvider.getAllDynamicIndices());
-        indexCollection = new SnapshotIndexCollection(indexPatternList);
+        indexCollection =
+            indexCollection.addSkippableIndices(dynamicIndicesProvider.getAllDynamicIndices());
       }
 
       final SnapshotRequest snapshotRequest =
@@ -122,7 +121,7 @@ public class BackupServiceImpl implements BackupService {
       threadPoolTaskExecutor.execute(
           () ->
               repository.executeSnapshotting(
-                  nextRequest, this::scheduleNextSnapshot, requestsQueue::clear));
+                  nextRequest, false, this::scheduleNextSnapshot, requestsQueue::clear));
       LOGGER.debug("Snapshot picked for execution: {}", nextRequest);
     }
   }

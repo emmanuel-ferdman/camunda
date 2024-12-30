@@ -12,7 +12,7 @@ import static org.mockito.Mockito.mock;
 
 import io.atomix.cluster.AtomixCluster;
 import io.atomix.utils.net.Address;
-import io.camunda.client.ZeebeClient;
+import io.camunda.client.CamundaClient;
 import io.camunda.client.api.command.ClientStatusException;
 import io.camunda.client.api.response.DeploymentEvent;
 import io.camunda.security.configuration.SecurityConfiguration;
@@ -39,6 +39,7 @@ import org.agrona.CloseHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 final class InterceptorIT {
 
@@ -92,7 +93,8 @@ final class InterceptorIT {
             brokerClient,
             scheduler,
             jobStreamClient.streamer(),
-            mock(UserServices.class));
+            mock(UserServices.class),
+            mock(PasswordEncoder.class));
 
     cluster.start().join();
     scheduler.start();
@@ -126,7 +128,7 @@ final class InterceptorIT {
 
     // when
     gateway.start().join();
-    try (final var client = createZeebeClient()) {
+    try (final var client = createCamundaClient()) {
       final Future<DeploymentEvent> result =
           client
               .newDeployResourceCommand()
@@ -153,7 +155,7 @@ final class InterceptorIT {
 
     // when
     gateway.start().join();
-    try (final var client = createZeebeClient()) {
+    try (final var client = createCamundaClient()) {
       try {
         client.newTopologyRequest().send().join();
       } catch (final ClientStatusException ignored) {
@@ -165,8 +167,8 @@ final class InterceptorIT {
     assertThat(ContextInspectingInterceptor.CONTEXT_QUERY_API.get()).isNotNull();
   }
 
-  private ZeebeClient createZeebeClient() {
-    return ZeebeClient.newClientBuilder()
+  private CamundaClient createCamundaClient() {
+    return CamundaClient.newClientBuilder()
         .gatewayAddress(
             NetUtil.toSocketAddressString(gateway.getGatewayCfg().getNetwork().toSocketAddress()))
         .usePlaintext()
