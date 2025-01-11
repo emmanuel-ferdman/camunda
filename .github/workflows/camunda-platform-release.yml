@@ -520,7 +520,7 @@ jobs:
             secret/data/products/optimize/ci/camunda-optimize REGISTRY_HUB_DOCKER_COM_USR;
             secret/data/products/optimize/ci/camunda-optimize REGISTRY_HUB_DOCKER_COM_PSW;
       - name: Login to DockerHub
-        uses: docker/login-action@7ca345011ac4304463197fac0e56eab1bc7e6af0
+        uses: docker/login-action@327cd5a69de6c009b9ce71bce8395f28e651bf99
         with:
           username: ${{ steps.secrets.outputs.REGISTRY_HUB_DOCKER_COM_USR }}
           password: ${{ steps.secrets.outputs.REGISTRY_HUB_DOCKER_COM_PSW }}
@@ -528,6 +528,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: release-artifacts-${{ inputs.releaseVersion }}
+      - name: Move optimize artifacts into expected dir
+        run: |
+          mkdir -p "optimize-distro/target"
+          mv camunda-optimize-${RELEASE_VERSION}-production.tar.gz ./optimize-distro/target/
       - name: Build Optimize Docker Image
         uses: ./.github/actions/build-platform-docker
         id: build-optimize-docker

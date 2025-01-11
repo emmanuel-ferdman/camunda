@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/tls"
-	"errors"
 	"flag"
 	"fmt"
 	"github.com/camunda/camunda/c8run/internal/unix"
@@ -65,7 +64,7 @@ func queryCamundaHealth(c8 C8Run, name string, settings C8RunSettings) error {
 	if settings.keystore != "" && settings.keystorePassword != "" {
 		protocol = "https"
 	}
-	url := protocol + "://localhost:" + strconv.Itoa(settings.port) + "/operate/login"
+	url := protocol + "://localhost:9600/actuator/health"
 	for retries := 24; retries >= 0; retries-- {
 		fmt.Println("Waiting for " + name + " to start. " + strconv.Itoa(retries) + " retries left")
 		time.Sleep(14 * time.Second)
@@ -103,16 +102,7 @@ func stopProcess(c8 C8Run, pidfile string) {
 		}
 		os.Remove(pidfile)
 
-	} else if errors.Is(err, os.ErrNotExist) {
-		// path/to/whatever does *not* exist
-
-	} else {
-		// Schrodinger: file may or may not exist. See err for details.
-
-		// Therefore, do *NOT* use !os.IsNotExist(err) to test for file existence
-
 	}
-
 }
 
 func getC8RunPlatform() C8Run {
@@ -133,8 +123,22 @@ func adjustJavaOpts(javaOpts string, settings C8RunSettings) string {
 	if settings.port != 8080 {
 		javaOpts = javaOpts + " -Dserver.port=" + strconv.Itoa(settings.port)
 	}
-	javaOpts = javaOpts + " -Dspring.profiles.active=operate,tasklist,broker,identity"
+	if settings.username != "" || settings.password != "" {
+		javaOpts = javaOpts + " -Dzeebe.broker.exporters.camundaExporter.args.createSchema=true"
+		javaOpts = javaOpts + " -Dzeebe.broker.exporters.camundaExporter.className=io.camunda.exporter.CamundaExporter"
+		javaOpts = javaOpts + " -Dcamunda.security.authorizations.enabled=true"
+		javaOpts = javaOpts + " -Dcamunda.security.initialization.users[0].name=Demo"
+		javaOpts = javaOpts + " -Dcamunda.security.initialization.users[0].email=demo@demo.com"
+	}
+	if settings.username != "" {
+		javaOpts = javaOpts + " -Dcamunda.security.initialization.users[0].username=" + settings.username
+	}
+	if settings.password != "" {
+		javaOpts = javaOpts + " -Dcamunda.security.initialization.users[0].password=" + settings.password
+	}
+	javaOpts = javaOpts + " -Dspring.profiles.active=operate,tasklist,broker,identity,auth-basic"
 	os.Setenv("CAMUNDA_OPERATE_ZEEBE_RESTADDRESS", protocol+"://localhost:"+strconv.Itoa(settings.port))
+	fmt.Println("Java opts: " + javaOpts)
 	return javaOpts
 }
 
@@ -152,15 +156,53 @@ func validateKeystore(settings C8RunSettings, parentDir string) error {
 	return nil
 }
 
+func startDocker(extractedComposePath string) error {
+	os.Chdir(extractedComposePath)
+
+	_, err := exec.LookPath("docker")
+	if err != nil {
+		return err
+	}
+
+	composeCmd := exec.Command("docker", "compose", "up", "-d")
+	composeCmd.Stdout = os.Stdout
+	composeCmd.Stderr = os.Stderr
+	err = composeCmd.Run()
+	if err != nil {
+		return err
+	}
+	os.Chdir("..")
+	return nil
+}
+
+func stopDocker(extractedComposePath string) error {
+	os.Chdir(extractedComposePath)
+	_, err := exec.LookPath("docker")
+	if err != nil {
+		return err
+	}
+	composeCmd := exec.Command("docker", "compose", "down")
+	composeCmd.Stdout = os.Stdout
+	composeCmd.Stderr = os.Stderr
+	err = composeCmd.Run()
+	if err != nil {
+		return err
+	}
+	os.Chdir("..")
+	return nil
+}
+
 func main() {
 	c8 := getC8RunPlatform()
 	baseDir, _ := os.Getwd()
-	// parentDir, _ := filepath.Dir(baseDir)
 	parentDir := baseDir
-	// deploymentDir := filepath.Join(parentDir, "configuration", "resources")
 	elasticsearchVersion := "8.13.4"
-	camundaVersion := "8.7.0-alpha2"
-	connectorsVersion := "8.7.0-alpha2.1"
+	camundaReleaseTag := "untagged-6aae82d948631897ab68"
+	camundaVersion := "8.7.0-alpha3-rc5"
+	connectorsVersion := "8.7.0-alpha3.2"
+	composeTag := "8.7-alpha2"
+	composeExtractedFolder := "camunda-platform-8.7-alpha2"
+
 	if os.Getenv("CAMUNDA_VERSION") != "" {
 		camundaVersion = os.Getenv("CAMUNDA_VERSION")
 	}
@@ -214,10 +256,20 @@ func main() {
 	startFlagSet.StringVar(&settings.keystore, "keystore", "", "Provide a JKS filepath to enable TLS")
 	startFlagSet.StringVar(&settings.keystorePassword, "keystorePassword", "", "Provide a password to unlock your JKS keystore")
 	startFlagSet.StringVar(&settings.logLevel, "log-level", "", "Adjust the log level of Camunda")
+	startFlagSet.BoolVar(&settings.disableElasticsearch, "disable-elasticsearch", false, "Do not start or stop Elasticsearch (still requires Elasticsearch to be running outside of c8run)")
+	startFlagSet.BoolVar(&settings.docker, "docker", false, "Run Camunda from docker-compose.")
+	startFlagSet.StringVar(&settings.username, "username", "demo", "Change the first users username (default: demo)")
+	startFlagSet.StringVar(&settings.password, "password", "demo", "Change the first users password (default: demo)")
+
+	stopFlagSet := flag.NewFlagSet("stop", flag.ExitOnError)
+	stopFlagSet.BoolVar(&settings.disableElasticsearch, "disable-elasticsearch", false, "Do not stop Elasticsearch")
+	stopFlagSet.BoolVar(&settings.docker, "docker", false, "Stop docker-compose distribution of camunda.")
 
 	switch baseCommand {
 	case "start":
 		startFlagSet.Parse(os.Args[2:])
+	case "stop":
+		stopFlagSet.Parse(os.Args[2:])
 	}
 
 	if settings.logLevel != "" {
@@ -228,6 +280,24 @@ func main() {
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
+	}
+
+	if settings.docker && baseCommand == "start" {
+		err = startDocker(composeExtractedFolder)
+		if err != nil {
+			fmt.Println(err.Error())
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	if settings.docker && baseCommand == "stop" {
+		err = stopDocker(composeExtractedFolder)
+		if err != nil {
+			fmt.Println(err.Error())
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 
 	javaHome := os.Getenv("JAVA_HOME")
@@ -310,33 +380,35 @@ func main() {
 
 		os.Setenv("ES_JAVA_OPTS", "-Xms1g -Xmx1g")
 
-		fmt.Print("Starting Elasticsearch " + elasticsearchVersion + "...\n")
-		fmt.Print("(Hint: you can find the log output in the 'elasticsearch.log' file in the 'log' folder of your distribution.)\n")
+		if !settings.disableElasticsearch {
+			fmt.Print("Starting Elasticsearch " + elasticsearchVersion + "...\n")
+			fmt.Print("(Hint: you can find the log output in the 'elasticsearch.log' file in the 'log' folder of your distribution.)\n")
 
-		elasticsearchLogFilePath := filepath.Join(parentDir, "log", "elasticsearch.log")
-		elasticsearchLogFile, err := os.OpenFile(elasticsearchLogFilePath, os.O_RDWR|os.O_CREATE, 0644)
-		if err != nil {
-			fmt.Print("Failed to open file: " + elasticsearchLogFilePath)
-			os.Exit(1)
-		}
+			elasticsearchLogFilePath := filepath.Join(parentDir, "log", "elasticsearch.log")
+			elasticsearchLogFile, err := os.OpenFile(elasticsearchLogFilePath, os.O_RDWR|os.O_CREATE, 0644)
+			if err != nil {
+				fmt.Print("Failed to open file: " + elasticsearchLogFilePath)
+				os.Exit(1)
+			}
 
-		elasticsearchCmd := c8.ElasticsearchCmd(elasticsearchVersion, parentDir)
-		elasticsearchCmd.Stdout = elasticsearchLogFile
-		elasticsearchCmd.Stderr = elasticsearchLogFile
-		err = elasticsearchCmd.Start()
-		if err != nil {
-			fmt.Printf("%+v", err)
-			os.Exit(1)
-		}
-		fmt.Print("Process id ", elasticsearchCmd.Process.Pid, "\n")
+			elasticsearchCmd := c8.ElasticsearchCmd(elasticsearchVersion, parentDir)
+			elasticsearchCmd.Stdout = elasticsearchLogFile
+			elasticsearchCmd.Stderr = elasticsearchLogFile
+			err = elasticsearchCmd.Start()
+			if err != nil {
+				fmt.Printf("%+v", err)
+				os.Exit(1)
+			}
+			fmt.Print("Process id ", elasticsearchCmd.Process.Pid, "\n")
 
-		elasticsearchPidFile, err := os.OpenFile(elasticsearchPidPath, os.O_RDWR|os.O_CREATE, 0644)
-		if err != nil {
-			fmt.Print("Failed to open file: " + elasticsearchPidPath)
-			os.Exit(1)
+			elasticsearchPidFile, err := os.OpenFile(elasticsearchPidPath, os.O_RDWR|os.O_CREATE, 0644)
+			if err != nil {
+				fmt.Print("Failed to open file: " + elasticsearchPidPath)
+				os.Exit(1)
+			}
+			elasticsearchPidFile.Write([]byte(strconv.Itoa(elasticsearchCmd.Process.Pid)))
+			queryElasticsearchHealth("Elasticsearch", "http://localhost:9200/_cluster/health?wait_for_status=green&wait_for_active_shards=all&wait_for_no_initializing_shards=true&timeout=120s")
 		}
-		elasticsearchPidFile.Write([]byte(strconv.Itoa(elasticsearchCmd.Process.Pid)))
-		queryElasticsearchHealth("Elasticsearch", "http://localhost:9200/_cluster/health?wait_for_status=green&wait_for_active_shards=all&wait_for_no_initializing_shards=true&timeout=120s")
 
 		connectorsCmd := c8.ConnectorsCmd(javaBinary, parentDir, camundaVersion)
 		connectorsLogPath := filepath.Join(parentDir, "log", "connectors.log")
@@ -394,8 +466,10 @@ func main() {
 	}
 
 	if baseCommand == "stop" {
-		stopProcess(c8, elasticsearchPidPath)
-		fmt.Println("Elasticsearch is stopped.")
+		if !settings.disableElasticsearch {
+			stopProcess(c8, elasticsearchPidPath)
+			fmt.Println("Elasticsearch is stopped.")
+		}
 		stopProcess(c8, connectorsPidPath)
 		fmt.Println("Connectors is stopped.")
 		stopProcess(c8, camundaPidPath)
@@ -404,13 +478,13 @@ func main() {
 
 	if baseCommand == "package" {
 		if runtime.GOOS == "windows" {
-			err := PackageWindows(camundaVersion, elasticsearchVersion, connectorsVersion)
+			err := PackageWindows(camundaVersion, elasticsearchVersion, connectorsVersion, camundaReleaseTag, composeTag)
 			if err != nil {
 				fmt.Printf("%+v", err)
 				os.Exit(1)
 			}
 		} else if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
-			err := PackageUnix(camundaVersion, elasticsearchVersion, connectorsVersion)
+			err := PackageUnix(camundaVersion, elasticsearchVersion, connectorsVersion, camundaReleaseTag, composeTag)
 			if err != nil {
 				fmt.Printf("%+v", err)
 				os.Exit(1)

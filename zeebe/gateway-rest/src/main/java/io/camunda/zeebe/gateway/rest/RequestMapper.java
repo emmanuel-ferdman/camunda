@@ -55,8 +55,7 @@ import io.camunda.service.ResourceServices.DeployResourcesRequest;
 import io.camunda.service.ResourceServices.ResourceDeletionRequest;
 import io.camunda.service.TenantServices.TenantDTO;
 import io.camunda.service.UserServices.UserDTO;
-import io.camunda.zeebe.auth.api.JwtAuthorizationBuilder;
-import io.camunda.zeebe.auth.impl.Authorization;
+import io.camunda.zeebe.auth.Authorization;
 import io.camunda.zeebe.gateway.protocol.rest.AuthorizationPatchRequest;
 import io.camunda.zeebe.gateway.protocol.rest.CancelProcessInstanceRequest;
 import io.camunda.zeebe.gateway.protocol.rest.Changeset;
@@ -124,6 +123,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -131,6 +131,17 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.web.multipart.MultipartFile;
 
 public class RequestMapper {
+
+  public static final String VND_CAMUNDA_API_KEYS_STRING_JSON = "vnd.camunda.api.keys.string+json";
+  public static final String VND_CAMUNDA_API_KEYS_NUMBER_JSON = "vnd.camunda.api.keys.number+json";
+  public static final MediaType MEDIA_TYPE_KEYS_STRING =
+      new MediaType("application", VND_CAMUNDA_API_KEYS_STRING_JSON);
+  public static final MediaType MEDIA_TYPE_KEYS_NUMBER =
+      new MediaType("application", VND_CAMUNDA_API_KEYS_NUMBER_JSON);
+  public static final String MEDIA_TYPE_KEYS_STRING_VALUE =
+      "application/" + VND_CAMUNDA_API_KEYS_STRING_JSON;
+  public static final String MEDIA_TYPE_KEYS_NUMBER_VALUE =
+      "application/" + VND_CAMUNDA_API_KEYS_NUMBER_JSON;
 
   public static CompleteUserTaskRequest toUserTaskCompletionRequest(
       final UserTaskCompletionRequest completionRequest, final long userTaskKey) {
@@ -522,12 +533,8 @@ public class RequestMapper {
     final List<Long> authenticatedRoleKeys = new ArrayList<>();
     final List<String> authorizedTenants = TenantAttributeHolder.getTenantIds();
 
-    final var token =
-        Authorization.jwtEncoder()
-            .withIssuer(JwtAuthorizationBuilder.DEFAULT_ISSUER)
-            .withAudience(JwtAuthorizationBuilder.DEFAULT_AUDIENCE)
-            .withSubject(JwtAuthorizationBuilder.DEFAULT_SUBJECT)
-            .withClaim(Authorization.AUTHORIZED_TENANTS, authorizedTenants);
+    final Map<String, Object> claims = new HashMap<>();
+    claims.put(Authorization.AUTHORIZED_TENANTS, authorizedTenants);
 
     final var requestAuthentication = SecurityContextHolder.getContext().getAuthentication();
 
@@ -538,20 +545,19 @@ public class RequestMapper {
         authenticatedUserKey = authenticatedPrincipal.getUserKey();
         authenticatedRoleKeys.addAll(
             authenticatedPrincipal.getRoles().stream().map(RoleEntity::roleKey).toList());
-        token.withClaim(Authorization.AUTHORIZED_USER_KEY, authenticatedUserKey);
+        claims.put(Authorization.AUTHORIZED_USER_KEY, authenticatedUserKey);
       }
 
       if (requestAuthentication instanceof final JwtAuthenticationToken jwtAuthenticationToken) {
         jwtAuthenticationToken
             .getTokenAttributes()
             .forEach(
-                (key, value) ->
-                    token.withClaim(Authorization.USER_TOKEN_CLAIM_PREFIX + key, value));
+                (key, value) -> claims.put(Authorization.USER_TOKEN_CLAIM_PREFIX + key, value));
       }
     }
 
     return new Builder()
-        .token(token.build())
+        .claims(claims)
         .user(authenticatedUserKey)
         .roleKeys(authenticatedRoleKeys)
         .tenants(authorizedTenants)
@@ -559,15 +565,7 @@ public class RequestMapper {
   }
 
   public static Authentication getAnonymousAuthentication() {
-    return new Builder()
-        .token(
-            Authorization.jwtEncoder()
-                .withIssuer(JwtAuthorizationBuilder.DEFAULT_ISSUER)
-                .withAudience(JwtAuthorizationBuilder.DEFAULT_AUDIENCE)
-                .withSubject(JwtAuthorizationBuilder.DEFAULT_SUBJECT)
-                .withClaim(Authorization.AUTHORIZED_ANONYMOUS_USER, true)
-                .build())
-        .build();
+    return new Builder().claims(Map.of(Authorization.AUTHORIZED_ANONYMOUS_USER, true)).build();
   }
 
   public static <T> Either<ProblemDetail, T> getResult(
