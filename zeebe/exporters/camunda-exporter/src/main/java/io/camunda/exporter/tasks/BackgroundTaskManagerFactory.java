@@ -23,6 +23,7 @@ import io.camunda.exporter.tasks.archiver.ProcessInstancesArchiverJob;
 import io.camunda.exporter.tasks.batchoperations.BatchOperationUpdateRepository;
 import io.camunda.exporter.tasks.batchoperations.BatchOperationUpdateTask;
 import io.camunda.exporter.tasks.batchoperations.ElasticsearchBatchOperationUpdateRepository;
+import io.camunda.exporter.tasks.batchoperations.OpensearchBatchOperationUpdateRepository;
 import io.camunda.exporter.tasks.incident.ElasticsearchIncidentUpdateRepository;
 import io.camunda.exporter.tasks.incident.IncidentUpdateRepository;
 import io.camunda.exporter.tasks.incident.IncidentUpdateTask;
@@ -127,15 +128,18 @@ public final class BackgroundTaskManagerFactory {
             logger),
         1,
         postExport.getDelayBetweenRuns(),
+        postExport.getMaxDelayBetweenRuns(),
         executor,
         logger);
   }
 
   private ReschedulingTask buildBatchOperationUpdateTask() {
+    final var postExport = config.getPostExport();
     return new ReschedulingTask(
         new BatchOperationUpdateTask(batchOperationUpdateRepository, logger, executor),
-        config.getArchiver().getRolloverBatchSize(),
-        config.getArchiver().getDelayBetweenRuns(),
+        1,
+        postExport.getDelayBetweenRuns(),
+        postExport.getMaxDelayBetweenRuns(),
         executor,
         logger);
   }
@@ -178,6 +182,7 @@ public final class BackgroundTaskManagerFactory {
         task,
         config.getArchiver().getRolloverBatchSize(),
         config.getArchiver().getDelayBetweenRuns(),
+        config.getArchiver().getMaxDelayBetweenRuns(),
         executor,
         logger);
   }
@@ -293,8 +298,13 @@ public final class BackgroundTaskManagerFactory {
             logger);
       }
       case OPENSEARCH -> {
-        // TODO
-        yield null;
+        final var connector = new OpensearchConnector(config.getConnect());
+        yield new OpensearchBatchOperationUpdateRepository(
+            connector.createAsyncClient(),
+            executor,
+            batchOperationTemplate.getFullQualifiedName(),
+            operationTemplate.getFullQualifiedName(),
+            logger);
       }
     };
   }

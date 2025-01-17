@@ -38,7 +38,7 @@
 #CAMUNDA_OPTIMIZE_ZEEBE_NAME=zeebe-record
 #CAMUNDA_OPTIMIZE_ZEEBE_PARTITION_COUNT=2
 #OPTIMIZE_OPENSEARCH_HOST=localhost
-#OPTIMIZE_OPENSEARCH_HTTP_PORT=9205
+#OPTIMIZE_OPENSEARCH_HTTP_PORT=9200
 #SPRING_PROFILES_ACTIVE=ccsm
 # This should only be set if you plan to use JWTs for the public API rather than a statically configured token
 #SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://localhost:18080/auth/realms/camunda-platform/protocol/openid-connect/certs
@@ -48,7 +48,7 @@
 services:
   keycloak:
     container_name: keycloak
-    image: bitnami/keycloak:26.0.7@sha256:52429a3e2c2894f2c59687cbb64c4da1d10d63a332fde5176a71cc701f971361
+    image: bitnami/keycloak:26.1.0@sha256:e18757062605529d3869a2f765660110cce6061d92259c83bb48fddff9b44d2f
     ports:
       - "18080:8080"
     environment:
@@ -193,7 +193,7 @@ services:
         soft: 65536 # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
         hard: 65536
     ports:
-      - 9205:9200
+      - 9200:9200
       - 9305:9300
     restart: always
     cpu_count: 4

@@ -14,12 +14,16 @@ import io.camunda.search.query.SearchQueryBuilders;
 import io.camunda.search.query.SearchQueryResult;
 import io.camunda.security.auth.Authentication;
 import io.camunda.security.auth.Authorization;
+import io.camunda.security.entity.Permission;
 import io.camunda.service.search.core.SearchQueryService;
 import io.camunda.service.security.SecurityContextProvider;
 import io.camunda.zeebe.broker.client.api.BrokerClient;
+import io.camunda.zeebe.gateway.impl.broker.request.BrokerAuthorizationCreateRequest;
+import io.camunda.zeebe.gateway.impl.broker.request.BrokerAuthorizationDeleteRequest;
 import io.camunda.zeebe.gateway.impl.broker.request.BrokerAuthorizationPatchRequest;
 import io.camunda.zeebe.protocol.impl.record.value.authorization.AuthorizationRecord;
 import io.camunda.zeebe.protocol.record.intent.AuthorizationIntent;
+import io.camunda.zeebe.protocol.record.value.AuthorizationOwnerType;
 import io.camunda.zeebe.protocol.record.value.AuthorizationResourceType;
 import io.camunda.zeebe.protocol.record.value.PermissionAction;
 import io.camunda.zeebe.protocol.record.value.PermissionType;
@@ -66,6 +70,31 @@ public class AuthorizationServices
         .findAllAuthorizations(query);
   }
 
+  public List<String> getAuthorizedResources(
+      final Set<Long> ownerKeys,
+      final PermissionType permissionType,
+      final AuthorizationResourceType resourceType) {
+    final var authorizationQuery =
+        SearchQueryBuilders.authorizationSearchQuery(
+            fn ->
+                fn.filter(
+                    f ->
+                        f.ownerKeys(ownerKeys.stream().toList())
+                            .permissionType(permissionType)
+                            .resourceType(resourceType.name())));
+    return findAll(authorizationQuery).stream()
+        .map(AuthorizationEntity::permissions)
+        .flatMap(List::stream)
+        .map(Permission::resourceIds)
+        .flatMap(Set::stream)
+        .collect(Collectors.toList());
+  }
+
+  public List<String> getAuthorizedApplications(final Set<Long> ownerKeys) {
+    return getAuthorizedResources(
+        ownerKeys, PermissionType.READ, AuthorizationResourceType.APPLICATION);
+  }
+
   public Set<String> fetchAssignedPermissions(
       final Long ownerKey, final AuthorizationResourceType resourceType, final String resourceId) {
     final SearchQueryResult<AuthorizationEntity> result =
@@ -103,9 +132,33 @@ public class AuthorizationServices
     return sendBrokerRequest(brokerRequest);
   }
 
+  public CompletableFuture<AuthorizationRecord> createAuthorization(
+      final CreateAuthorizationRequest request) {
+    final var brokerRequest =
+        new BrokerAuthorizationCreateRequest()
+            .setOwnerId(request.ownerId())
+            .setOwnerType(request.ownerType())
+            .setResourceId(request.resourceId())
+            .setResourceType(request.resourceType())
+            .setPermissions(request.permissions());
+    return sendBrokerRequest(brokerRequest);
+  }
+
+  public CompletableFuture<AuthorizationRecord> deleteAuthorization(final long authorizationKey) {
+    final var brokerRequest = new BrokerAuthorizationDeleteRequest(authorizationKey);
+    return sendBrokerRequest(brokerRequest);
+  }
+
   public record PatchAuthorizationRequest(
       long ownerKey,
       PermissionAction action,
       AuthorizationResourceType resourceType,
       Map<PermissionType, Set<String>> permissions) {}
+
+  public record CreateAuthorizationRequest(
+      String ownerId,
+      AuthorizationOwnerType ownerType,
+      String resourceId,
+      AuthorizationResourceType resourceType,
+      Set<PermissionType> permissions) {}
 }

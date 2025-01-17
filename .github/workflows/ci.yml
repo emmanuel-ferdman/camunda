@@ -10,6 +10,8 @@ on:
   pull_request: {}
   merge_group: {}
   workflow_dispatch: {}
+  schedule:
+    - cron: '0 6 * * *' # daily full build in the morning to re-populate GHA caches
 
 # Limit workflow to 1 concurrent run per ref (branch): new commit -> old runs are canceled to save costs
 # Exception for main branch: complete builds for every commit needed for confidenence
@@ -76,7 +78,7 @@ jobs:
             object type "{}" cannot be filtered by object filtering `.*` since it has no object element
       - run: |
           curl -s -L "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" | tar xvz conftest
-          ./conftest test -o github --policy .github .github/workflows/*.yml
+          ./conftest test -o github --policy .github .github/workflows/*.y*ml
       - name: Observe build status
         if: always()
         continue-on-error: true
@@ -575,7 +577,7 @@ jobs:
         run: yarn test:ci
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
         with:
           name: optimize-unit-tests-frontend-junit
           path: |
@@ -628,7 +630,7 @@ jobs:
           threads: .5C
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
         with:
           name: optimize-unit-tests-backend-junit
           path: |

@@ -25,12 +25,14 @@ import io.camunda.service.DocumentServices.DocumentReferenceResponse;
 import io.camunda.zeebe.broker.client.api.dto.BrokerResponse;
 import io.camunda.zeebe.gateway.impl.job.JobActivationResult;
 import io.camunda.zeebe.gateway.protocol.rest.ActivatedJob;
+import io.camunda.zeebe.gateway.protocol.rest.AuthorizationCreateResponse;
 import io.camunda.zeebe.gateway.protocol.rest.CreateProcessInstanceResponse;
 import io.camunda.zeebe.gateway.protocol.rest.DeploymentDecision;
 import io.camunda.zeebe.gateway.protocol.rest.DeploymentDecisionRequirements;
 import io.camunda.zeebe.gateway.protocol.rest.DeploymentForm;
 import io.camunda.zeebe.gateway.protocol.rest.DeploymentMetadata;
 import io.camunda.zeebe.gateway.protocol.rest.DeploymentProcess;
+import io.camunda.zeebe.gateway.protocol.rest.DeploymentResource;
 import io.camunda.zeebe.gateway.protocol.rest.DeploymentResponse;
 import io.camunda.zeebe.gateway.protocol.rest.DocumentCreationBatchResponse;
 import io.camunda.zeebe.gateway.protocol.rest.DocumentCreationFailureDetail;
@@ -54,6 +56,7 @@ import io.camunda.zeebe.gateway.protocol.rest.TenantUpdateResponse;
 import io.camunda.zeebe.gateway.protocol.rest.UserCreateResponse;
 import io.camunda.zeebe.msgpack.value.LongValue;
 import io.camunda.zeebe.msgpack.value.ValueArray;
+import io.camunda.zeebe.protocol.impl.record.value.authorization.AuthorizationRecord;
 import io.camunda.zeebe.protocol.impl.record.value.authorization.MappingRecord;
 import io.camunda.zeebe.protocol.impl.record.value.authorization.RoleRecord;
 import io.camunda.zeebe.protocol.impl.record.value.decision.DecisionEvaluationRecord;
@@ -61,6 +64,7 @@ import io.camunda.zeebe.protocol.impl.record.value.deployment.DecisionRecord;
 import io.camunda.zeebe.protocol.impl.record.value.deployment.DecisionRequirementsMetadataRecord;
 import io.camunda.zeebe.protocol.impl.record.value.deployment.DeploymentRecord;
 import io.camunda.zeebe.protocol.impl.record.value.deployment.FormMetadataRecord;
+import io.camunda.zeebe.protocol.impl.record.value.deployment.ResourceMetadataRecord;
 import io.camunda.zeebe.protocol.impl.record.value.group.GroupRecord;
 import io.camunda.zeebe.protocol.impl.record.value.job.JobRecord;
 import io.camunda.zeebe.protocol.impl.record.value.message.MessageCorrelationRecord;
@@ -303,6 +307,7 @@ public final class ResponseMapper {
     addDeployedDecision(response, brokerResponse.decisionsMetadata());
     addDeployedDecisionRequirements(response, brokerResponse.decisionRequirementsMetadata());
     addDeployedForm(response, brokerResponse.formMetadata());
+    addDeployedResource(response, brokerResponse.resourceMetadata());
     return new ResponseEntity<>(response, HttpStatus.OK);
   }
 
@@ -328,6 +333,22 @@ public final class ResponseMapper {
                     .resourceName(form.getResourceName())
                     .tenantId(form.getTenantId()))
         .map(deploymentForm -> new DeploymentMetadata().form(deploymentForm))
+        .forEach(response::addDeploymentsItem);
+  }
+
+  private static void addDeployedResource(
+      final DeploymentResponse response,
+      final ValueArray<ResourceMetadataRecord> resourceMetadataRecords) {
+    resourceMetadataRecords.stream()
+        .map(
+            resource ->
+                new DeploymentResource()
+                    .resourceId(resource.getResourceId())
+                    .version(resource.getVersion())
+                    .resourceKey(resource.getResourceKey())
+                    .resourceName(resource.getResourceName())
+                    .tenantId(resource.getTenantId()))
+        .map(deploymentForm -> new DeploymentMetadata().resource(deploymentForm))
         .forEach(response::addDeploymentsItem);
   }
 
@@ -434,8 +455,21 @@ public final class ResponseMapper {
     return new ResponseEntity<>(response, HttpStatus.OK);
   }
 
+  public static ResponseEntity<Object> toAuthorizationCreateResponse(
+      final AuthorizationRecord authorizationRecord) {
+    final var response =
+        new AuthorizationCreateResponse()
+            .authorizationKey(authorizationRecord.getAuthorizationKey());
+    return new ResponseEntity<>(response, HttpStatus.CREATED);
+  }
+
   public static ResponseEntity<Object> toUserCreateResponse(final UserRecord userRecord) {
-    final var response = new UserCreateResponse().userKey(userRecord.getUserKey());
+    final var response =
+        new UserCreateResponse()
+            .userKey(userRecord.getUserKey())
+            .username(userRecord.getUsername())
+            .email(userRecord.getEmail())
+            .name(userRecord.getName());
     return new ResponseEntity<>(response, HttpStatus.CREATED);
   }
 

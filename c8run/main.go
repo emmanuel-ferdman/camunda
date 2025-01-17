@@ -126,7 +126,6 @@ func adjustJavaOpts(javaOpts string, settings C8RunSettings) string {
 	if settings.username != "" || settings.password != "" {
 		javaOpts = javaOpts + " -Dzeebe.broker.exporters.camundaExporter.args.createSchema=true"
 		javaOpts = javaOpts + " -Dzeebe.broker.exporters.camundaExporter.className=io.camunda.exporter.CamundaExporter"
-		javaOpts = javaOpts + " -Dcamunda.security.authorizations.enabled=true"
 		javaOpts = javaOpts + " -Dcamunda.security.initialization.users[0].name=Demo"
 		javaOpts = javaOpts + " -Dcamunda.security.initialization.users[0].email=demo@demo.com"
 	}
@@ -197,11 +196,11 @@ func main() {
 	baseDir, _ := os.Getwd()
 	parentDir := baseDir
 	elasticsearchVersion := "8.13.4"
-	camundaReleaseTag := "untagged-6aae82d948631897ab68"
-	camundaVersion := "8.7.0-alpha3-rc5"
+	camundaReleaseTag := "8.7.0-alpha3"
+	camundaVersion := "8.7.0-alpha3"
 	connectorsVersion := "8.7.0-alpha3.2"
-	composeTag := "8.7-alpha2"
-	composeExtractedFolder := "camunda-platform-8.7-alpha2"
+	composeTag := "8.7-alpha3"
+	composeExtractedFolder := "camunda-platform-8.7-alpha3"
 
 	if os.Getenv("CAMUNDA_VERSION") != "" {
 		camundaVersion = os.Getenv("CAMUNDA_VERSION")

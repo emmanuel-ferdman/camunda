@@ -8,6 +8,7 @@
 package io.camunda.zeebe.gateway.rest;
 
 import static io.camunda.zeebe.gateway.rest.validator.AuthorizationRequestValidator.validateAuthorizationAssignRequest;
+import static io.camunda.zeebe.gateway.rest.validator.AuthorizationRequestValidator.validateAuthorizationCreateRequest;
 import static io.camunda.zeebe.gateway.rest.validator.ClockValidator.validateClockPinRequest;
 import static io.camunda.zeebe.gateway.rest.validator.DocumentValidator.validateDocumentLinkParams;
 import static io.camunda.zeebe.gateway.rest.validator.DocumentValidator.validateDocumentMetadata;
@@ -32,12 +33,14 @@ import static io.camunda.zeebe.gateway.rest.validator.UserValidator.validateUser
 import static io.camunda.zeebe.gateway.rest.validator.UserValidator.validateUserUpdateRequest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.camunda.authentication.entity.CamundaPrincipal;
 import io.camunda.authentication.entity.CamundaUser;
 import io.camunda.authentication.tenant.TenantAttributeHolder;
 import io.camunda.document.api.DocumentMetadataModel;
 import io.camunda.search.entities.RoleEntity;
 import io.camunda.security.auth.Authentication;
 import io.camunda.security.auth.Authentication.Builder;
+import io.camunda.service.AuthorizationServices.CreateAuthorizationRequest;
 import io.camunda.service.AuthorizationServices.PatchAuthorizationRequest;
 import io.camunda.service.DocumentServices.DocumentCreateRequest;
 import io.camunda.service.DocumentServices.DocumentLinkParams;
@@ -56,6 +59,8 @@ import io.camunda.service.ResourceServices.ResourceDeletionRequest;
 import io.camunda.service.TenantServices.TenantDTO;
 import io.camunda.service.UserServices.UserDTO;
 import io.camunda.zeebe.auth.Authorization;
+import io.camunda.zeebe.auth.ClaimTransformer;
+import io.camunda.zeebe.gateway.protocol.rest.AuthorizationCreateRequest;
 import io.camunda.zeebe.gateway.protocol.rest.AuthorizationPatchRequest;
 import io.camunda.zeebe.gateway.protocol.rest.CancelProcessInstanceRequest;
 import io.camunda.zeebe.gateway.protocol.rest.Changeset;
@@ -78,6 +83,7 @@ import io.camunda.zeebe.gateway.protocol.rest.MessagePublicationRequest;
 import io.camunda.zeebe.gateway.protocol.rest.MigrateProcessInstanceRequest;
 import io.camunda.zeebe.gateway.protocol.rest.ModifyProcessInstanceActivateInstruction;
 import io.camunda.zeebe.gateway.protocol.rest.ModifyProcessInstanceRequest;
+import io.camunda.zeebe.gateway.protocol.rest.PermissionTypeEnum;
 import io.camunda.zeebe.gateway.protocol.rest.RoleCreateRequest;
 import io.camunda.zeebe.gateway.protocol.rest.RoleUpdateRequest;
 import io.camunda.zeebe.gateway.protocol.rest.SetVariableRequest;
@@ -102,6 +108,7 @@ import io.camunda.zeebe.protocol.impl.record.value.processinstance.ProcessInstan
 import io.camunda.zeebe.protocol.impl.record.value.processinstance.ProcessInstanceModificationTerminateInstruction;
 import io.camunda.zeebe.protocol.impl.record.value.processinstance.ProcessInstanceModificationVariableInstruction;
 import io.camunda.zeebe.protocol.impl.record.value.usertask.UserTaskRecord;
+import io.camunda.zeebe.protocol.record.value.AuthorizationOwnerType;
 import io.camunda.zeebe.protocol.record.value.AuthorizationResourceType;
 import io.camunda.zeebe.protocol.record.value.PermissionAction;
 import io.camunda.zeebe.protocol.record.value.PermissionType;
@@ -187,14 +194,14 @@ public class RequestMapper {
                 getStringOrEmpty(updateRequest, UserTaskUpdateRequest::getAction)));
   }
 
-  public static Either<ProblemDetail, UpdateUserRequest> toUserUpdateRequest(
-      final UserUpdateRequest updateRequest, final long userKey) {
+  public static Either<ProblemDetail, UserDTO> toUserUpdateRequest(
+      final UserUpdateRequest updateRequest, final String username) {
     final UserChangeset changeset = updateRequest.getChangeset();
     return getResult(
         validateUserUpdateRequest(updateRequest),
         () ->
-            new UpdateUserRequest(
-                userKey, changeset.getName(), changeset.getEmail(), changeset.getPassword()));
+            new UserDTO(
+                username, changeset.getName(), changeset.getEmail(), changeset.getPassword()));
   }
 
   public static Either<ProblemDetail, Long> getPinnedEpoch(final ClockPinRequest pinRequest) {
@@ -310,6 +317,26 @@ public class RequestMapper {
         () -> new UpdateGroupRequest(groupKey, groupUpdateRequest.getChangeset().getName()));
   }
 
+  public static Either<ProblemDetail, CreateAuthorizationRequest> toCreateAuthorizationRequest(
+      final AuthorizationCreateRequest request) {
+    return getResult(
+        validateAuthorizationCreateRequest(request),
+        () ->
+            new CreateAuthorizationRequest(
+                request.getOwnerId(),
+                AuthorizationOwnerType.valueOf(request.getOwnerType().name()),
+                request.getResourceId(),
+                AuthorizationResourceType.valueOf(request.getResourceType().name()),
+                transfomPermissions(request.getPermissions())));
+  }
+
+  private static Set<PermissionType> transfomPermissions(
+      final List<PermissionTypeEnum> permissions) {
+    return permissions.stream()
+        .map(permission -> PermissionType.valueOf(permission.name()))
+        .collect(Collectors.toSet());
+  }
+
   public static Either<ProblemDetail, PatchAuthorizationRequest> toAuthorizationPatchRequest(
       final long ownerKey, final AuthorizationPatchRequest authorizationPatchRequest) {
     return getResult(
@@ -409,13 +436,11 @@ public class RequestMapper {
         () -> new DocumentLinkParams(Duration.ofMillis(documentLinkRequest.getTimeToLive())));
   }
 
-  public static Either<ProblemDetail, UserDTO> toUserDTO(
-      final Long userKey, final UserRequest request) {
+  public static Either<ProblemDetail, UserDTO> toUserDTO(final UserRequest request) {
     return getResult(
         validateUserCreateRequest(request),
         () ->
             new UserDTO(
-                userKey,
                 request.getUsername(),
                 request.getName(),
                 request.getEmail(),
@@ -533,26 +558,27 @@ public class RequestMapper {
     final List<Long> authenticatedRoleKeys = new ArrayList<>();
     final List<String> authorizedTenants = TenantAttributeHolder.getTenantIds();
 
-    final Map<String, Object> claims = new HashMap<>();
-    claims.put(Authorization.AUTHORIZED_TENANTS, authorizedTenants);
-
     final var requestAuthentication = SecurityContextHolder.getContext().getAuthentication();
 
-    if (requestAuthentication != null) {
+    final Map<String, Object> claims = new HashMap<>();
 
+    if (requestAuthentication != null) {
       if (requestAuthentication.getPrincipal()
-          instanceof final CamundaUser authenticatedPrincipal) {
-        authenticatedUserKey = authenticatedPrincipal.getUserKey();
+          instanceof final CamundaPrincipal authenticatedPrincipal) {
         authenticatedRoleKeys.addAll(
-            authenticatedPrincipal.getRoles().stream().map(RoleEntity::roleKey).toList());
-        claims.put(Authorization.AUTHORIZED_USER_KEY, authenticatedUserKey);
+            authenticatedPrincipal.getAuthenticationContext().roles().stream()
+                .map(RoleEntity::roleKey)
+                .toList());
+        if (authenticatedPrincipal instanceof final CamundaUser user) {
+          authenticatedUserKey = user.getUserKey();
+          claims.put(Authorization.AUTHORIZED_USERNAME, user.getUsername());
+        }
       }
 
       if (requestAuthentication instanceof final JwtAuthenticationToken jwtAuthenticationToken) {
         jwtAuthenticationToken
             .getTokenAttributes()
-            .forEach(
-                (key, value) -> claims.put(Authorization.USER_TOKEN_CLAIM_PREFIX + key, value));
+            .forEach((key, value) -> ClaimTransformer.applyUserClaim(claims, key, value));
       }
     }
 
@@ -878,8 +904,6 @@ public class RequestMapper {
 
   public record UpdateUserTaskRequest(long userTaskKey, UserTaskRecord changeset, String action) {}
 
-  public record UpdateUserRequest(long userKey, String name, String email, String password) {}
-
   public record AssignUserTaskRequest(
       long userTaskKey, String assignee, String action, boolean allowOverride) {}
 
@@ -906,8 +930,6 @@ public class RequestMapper {
   public record CreateRoleRequest(String name) {}
 
   public record UpdateRoleRequest(long roleKey, String name) {}
-
-  public record CreateTenantRequest(String tenantId, String name) {}
 
   public record CreateGroupRequest(String name) {}
 

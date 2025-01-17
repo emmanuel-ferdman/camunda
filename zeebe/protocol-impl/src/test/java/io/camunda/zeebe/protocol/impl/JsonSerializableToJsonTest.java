@@ -82,7 +82,6 @@ import io.camunda.zeebe.protocol.record.value.EntityType;
 import io.camunda.zeebe.protocol.record.value.ErrorType;
 import io.camunda.zeebe.protocol.record.value.PermissionType;
 import io.camunda.zeebe.protocol.record.value.TenantOwned;
-import io.camunda.zeebe.protocol.record.value.UserType;
 import io.camunda.zeebe.protocol.record.value.VariableDocumentUpdateSemantic;
 import io.camunda.zeebe.test.util.JsonUtil;
 import io.camunda.zeebe.util.buffer.BufferUtil;
@@ -2625,16 +2624,14 @@ final class JsonSerializableToJsonTest {
                     .setUsername("foobar")
                     .setName("Foo Bar")
                     .setEmail("foo@bar")
-                    .setPassword("f00b4r")
-                    .setUserType(UserType.DEFAULT),
+                    .setPassword("f00b4r"),
         """
         {
           "userKey": 1,
           "username": "foobar",
           "name": "Foo Bar",
           "email": "foo@bar",
-          "password": "f00b4r",
-          "userType": "DEFAULT"
+          "password": "f00b4r"
         }
         """
       },
@@ -2656,8 +2653,7 @@ final class JsonSerializableToJsonTest {
           "username": "foobar",
           "name": "Foo Bar",
           "email": "foo@bar",
-          "password": "f00b4r",
-          "userType": "REGULAR"
+          "password": "f00b4r"
         }
         """
       },
@@ -2705,8 +2701,11 @@ final class JsonSerializableToJsonTest {
         (Supplier<AuthorizationRecord>)
             () ->
                 new AuthorizationRecord()
+                    .setAuthorizationKey(1L)
                     .setOwnerKey(1L)
+                    .setOwnerId("ownerId")
                     .setOwnerType(AuthorizationOwnerType.USER)
+                    .setResourceId("resourceId")
                     .setResourceType(AuthorizationResourceType.DEPLOYMENT)
                     .addPermission(
                         new Permission()
@@ -2714,11 +2713,15 @@ final class JsonSerializableToJsonTest {
                             .addResourceId("*")
                             .addResourceId("bpmnProcessId:foo"))
                     .addPermission(
-                        new Permission().setPermissionType(PermissionType.READ).addResourceId("*")),
+                        new Permission().setPermissionType(PermissionType.READ).addResourceId("*"))
+                    .setAuthorizationPermissions(Set.of(PermissionType.CREATE)),
         """
         {
+          "authorizationKey": 1,
           "ownerKey": 1,
+          "ownerId": "ownerId",
           "ownerType": "USER",
+          "resourceId": "resourceId",
           "resourceType": "DEPLOYMENT",
           "permissions": [
             {
@@ -2729,6 +2732,9 @@ final class JsonSerializableToJsonTest {
               "permissionType": "READ",
               "resourceIds": ["*"]
             }
+          ],
+          "authorizationPermissions": [
+            "CREATE"
           ]
         }
         """
@@ -2745,10 +2751,14 @@ final class JsonSerializableToJsonTest {
                     .setResourceType(AuthorizationResourceType.DEPLOYMENT),
         """
         {
+          "authorizationKey": -1,
+          "ownerId": "",
           "ownerKey": 1,
           "ownerType": "UNSPECIFIED",
+          "resourceId": "",
           "resourceType": "DEPLOYMENT",
-          "permissions": []
+          "permissions": [],
+          "authorizationPermissions": []
         }
         """
       },
@@ -3001,16 +3011,14 @@ final class JsonSerializableToJsonTest {
                             .setUsername("username")
                             .setName("name")
                             .setEmail("email")
-                            .setPassword("password")
-                            .setUserType(UserType.REGULAR))
+                            .setPassword("password"))
                     .addUser(
                         new UserRecord()
                             .setUserKey(4L)
                             .setUsername("foo")
                             .setName("bar")
                             .setEmail("baz")
-                            .setPassword("qux")
-                            .setUserType(UserType.REGULAR))
+                            .setPassword("qux"))
                     .setDefaultTenant(
                         new TenantRecord().setTenantKey(5).setTenantId("id").setName("name"))
                     .addMapping(
@@ -3039,16 +3047,14 @@ final class JsonSerializableToJsonTest {
             "username": "username",
             "name": "name",
             "email": "email",
-            "password": "password",
-            "userType": "REGULAR"
+            "password": "password"
           },
           {
             "userKey": 4,
             "username": "foo",
             "name": "bar",
             "email": "baz",
-            "password": "qux",
-            "userType": "REGULAR"
+            "password": "qux"
           }
         ],
         "defaultTenant": {

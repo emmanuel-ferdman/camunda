@@ -7,6 +7,7 @@
  */
 package io.camunda.operate.webapp.security.permission;
 
+import io.camunda.authentication.entity.CamundaPrincipal;
 import io.camunda.authentication.entity.CamundaUser;
 import io.camunda.operate.exceptions.OperateRuntimeException;
 import io.camunda.operate.webapp.security.identity.IdentityPermission;
@@ -79,6 +80,17 @@ public class PermissionsService {
     }
 
     return permissions;
+  }
+
+  /**
+   * hasPermissionForDeployment
+   *
+   * @return true if the user has the given permission for the process
+   */
+  public boolean hasPermissionForDeployment(
+      final Long deploymentKey, final IdentityPermission identityPermission) {
+    return hasPermissionForResource(
+        deploymentKey.toString(), AuthorizationResourceType.DEPLOYMENT, identityPermission);
   }
 
   /**
@@ -205,8 +217,10 @@ public class PermissionsService {
         SecurityContextHolder.getContext().getAuthentication();
     if (requestAuthentication != null) {
       final Object principal = requestAuthentication.getPrincipal();
-      if (principal instanceof final CamundaUser authenticatedPrincipal) {
-        return authenticatedPrincipal.getRoles().stream().map(RoleEntity::roleKey).toList();
+      if (principal instanceof final CamundaPrincipal authenticatedPrincipal) {
+        return authenticatedPrincipal.getAuthenticationContext().roles().stream()
+            .map(RoleEntity::roleKey)
+            .toList();
       }
     }
     return Collections.emptyList();
