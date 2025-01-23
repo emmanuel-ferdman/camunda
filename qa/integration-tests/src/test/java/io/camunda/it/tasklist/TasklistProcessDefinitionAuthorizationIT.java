@@ -21,15 +21,15 @@ import io.camunda.zeebe.it.util.AuthorizationsUtil.Permissions;
 import io.camunda.zeebe.it.util.SearchClientsUtil;
 import io.camunda.zeebe.qa.util.junit.ZeebeIntegration;
 import io.camunda.zeebe.qa.util.junit.ZeebeIntegration.TestZeebe;
-import io.camunda.zeebe.test.util.junit.AutoCloseResources;
-import io.camunda.zeebe.test.util.junit.AutoCloseResources.AutoCloseResource;
 import java.time.Duration;
 import java.util.List;
 import org.awaitility.Awaitility;
+import org.junit.jupiter.api.AutoClose;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
-@AutoCloseResources
+@Disabled("https://github.com/camunda/camunda/issues/27289")
 @ZeebeIntegration
 public class TasklistProcessDefinitionAuthorizationIT {
 
@@ -44,9 +44,9 @@ public class TasklistProcessDefinitionAuthorizationIT {
   private static final String TEST_USER_PASSWORD = "bar";
   private static long testUserKey;
 
-  @AutoCloseResource private static AuthorizationsUtil adminAuthClient;
-  @AutoCloseResource private static CamundaClient adminCamundaClient;
-  @AutoCloseResource private static TestRestTasklistClient tasklistRestClient;
+  @AutoClose private static AuthorizationsUtil adminAuthClient;
+  @AutoClose private static CamundaClient adminCamundaClient;
+  @AutoClose private static TestRestTasklistClient tasklistRestClient;
 
   private static long processDefinitionKey;
 
@@ -71,7 +71,7 @@ public class TasklistProcessDefinitionAuthorizationIT {
       intermediateAuthClient.createUserWithPermissions(
           ADMIN_USER_NAME,
           ADMIN_USER_PASSWORD,
-          new Permissions(ResourceTypeEnum.DEPLOYMENT, PermissionTypeEnum.CREATE, List.of("*")),
+          new Permissions(ResourceTypeEnum.RESOURCE, PermissionTypeEnum.CREATE, List.of("*")),
           new Permissions(
               ResourceTypeEnum.PROCESS_DEFINITION,
               PermissionTypeEnum.READ_PROCESS_DEFINITION,
@@ -118,6 +118,7 @@ public class TasklistProcessDefinitionAuthorizationIT {
     // given
     adminAuthClient.createPermissions(
         testUserKey,
+        TEST_USER_NAME,
         new Permissions(
             ResourceTypeEnum.PROCESS_DEFINITION,
             PermissionTypeEnum.READ_PROCESS_DEFINITION,
@@ -154,6 +155,7 @@ public class TasklistProcessDefinitionAuthorizationIT {
     // given
     adminAuthClient.createPermissions(
         testUserKey,
+        TEST_USER_NAME,
         new Permissions(
             ResourceTypeEnum.PROCESS_DEFINITION,
             PermissionTypeEnum.CREATE_PROCESS_INSTANCE,
@@ -176,6 +178,7 @@ public class TasklistProcessDefinitionAuthorizationIT {
     // given
     adminAuthClient.createPermissions(
         testUserKey,
+        TEST_USER_NAME,
         new Permissions(
             ResourceTypeEnum.PROCESS_DEFINITION,
             PermissionTypeEnum.CREATE_PROCESS_INSTANCE,

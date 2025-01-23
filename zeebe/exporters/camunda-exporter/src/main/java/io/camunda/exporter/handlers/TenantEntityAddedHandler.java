@@ -10,7 +10,6 @@ package io.camunda.exporter.handlers;
 import io.camunda.exporter.exceptions.PersistenceException;
 import io.camunda.exporter.store.BatchRequest;
 import io.camunda.webapps.schema.descriptors.usermanagement.index.TenantIndex;
-import io.camunda.webapps.schema.entities.usermanagement.GroupEntity;
 import io.camunda.webapps.schema.entities.usermanagement.TenantEntity;
 import io.camunda.zeebe.protocol.record.Record;
 import io.camunda.zeebe.protocol.record.ValueType;
@@ -45,7 +44,7 @@ public class TenantEntityAddedHandler implements ExportHandler<TenantEntity, Ten
   public List<String> generateIds(final Record<TenantRecordValue> record) {
     final var tenantRecord = record.getValue();
     return List.of(
-        GroupEntity.getChildKey(tenantRecord.getTenantKey(), tenantRecord.getEntityKey()));
+        TenantEntity.getChildKey(tenantRecord.getTenantId(), tenantRecord.getEntityId()));
   }
 
   @Override
@@ -57,14 +56,14 @@ public class TenantEntityAddedHandler implements ExportHandler<TenantEntity, Ten
   public void updateEntity(final Record<TenantRecordValue> record, final TenantEntity entity) {
     final TenantRecordValue value = record.getValue();
     entity
-        .setMemberKey(value.getEntityKey())
-        .setJoin(TenantIndex.JOIN_RELATION_FACTORY.createChild(value.getTenantKey()));
+        .setMemberId(value.getEntityId())
+        .setJoin(TenantIndex.JOIN_RELATION_FACTORY.createChild(value.getTenantId()));
   }
 
   @Override
   public void flush(final TenantEntity entity, final BatchRequest batchRequest)
       throws PersistenceException {
-    batchRequest.addWithRouting(indexName, entity, String.valueOf(entity.getJoin().parent()));
+    batchRequest.addWithRouting(indexName, entity, entity.getJoin().parent());
   }
 
   @Override

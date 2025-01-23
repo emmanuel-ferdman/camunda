@@ -12,7 +12,8 @@ import java.util.HashSet;
 import java.util.Set;
 
 public enum AuthorizationResourceType {
-  AUTHORIZATION(PermissionType.READ, PermissionType.UPDATE),
+  AUTHORIZATION(
+      PermissionType.READ, PermissionType.UPDATE, PermissionType.DELETE, PermissionType.CREATE),
   MAPPING_RULE(
       PermissionType.CREATE, PermissionType.READ, PermissionType.UPDATE, PermissionType.DELETE),
   MESSAGE(PermissionType.CREATE, PermissionType.READ),
@@ -20,7 +21,7 @@ public enum AuthorizationResourceType {
   APPLICATION(PermissionType.ACCESS),
   SYSTEM(PermissionType.READ, PermissionType.UPDATE),
   TENANT(PermissionType.CREATE, PermissionType.READ, PermissionType.UPDATE, PermissionType.DELETE),
-  DEPLOYMENT(
+  RESOURCE(
       PermissionType.CREATE,
       PermissionType.DELETE_FORM,
       PermissionType.DELETE_PROCESS,
@@ -42,7 +43,8 @@ public enum AuthorizationResourceType {
       PermissionType.DELETE_DECISION_INSTANCE),
   GROUP(PermissionType.CREATE, PermissionType.READ, PermissionType.UPDATE, PermissionType.DELETE),
   USER(PermissionType.CREATE, PermissionType.READ, PermissionType.UPDATE, PermissionType.DELETE),
-  ROLE(PermissionType.CREATE, PermissionType.READ, PermissionType.UPDATE, PermissionType.DELETE);
+  ROLE(PermissionType.CREATE, PermissionType.READ, PermissionType.UPDATE, PermissionType.DELETE),
+  UNSPECIFIED();
 
   private final Set<PermissionType> supportedPermissionTypes;
 

@@ -15,10 +15,12 @@
  */
 package io.camunda.client.process;
 
+import static io.camunda.client.api.search.response.ProcessInstanceState.ACTIVE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.github.tomakehurst.wiremock.http.RequestMethod;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
+import io.camunda.client.api.search.response.ProcessInstanceState;
 import io.camunda.client.impl.search.SearchQuerySortRequest;
 import io.camunda.client.impl.search.SearchQuerySortRequestMapper;
 import io.camunda.client.protocol.rest.*;
@@ -79,7 +81,7 @@ public class QueryProcessInstanceTest extends ClientRestTest {
                     .parentFlowNodeInstanceKey(30L)
                     .startDate(startDate)
                     .endDate(endDate)
-                    .state("ACTIVE")
+                    .state(ACTIVE)
                     .hasIncident(true)
                     .tenantId("tenant")
                     .variables(variables))
@@ -111,7 +113,7 @@ public class QueryProcessInstanceTest extends ClientRestTest {
     // when
     client
         .newProcessInstanceQuery()
-        .filter(f -> f.processInstanceKey(b -> b.gt(1L).lt(10L)))
+        .filter(f -> f.processInstanceKey(b -> b.in(1L, 10L)))
         .send()
         .join();
 
@@ -120,10 +122,9 @@ public class QueryProcessInstanceTest extends ClientRestTest {
         gatewayService.getLastRequest(ProcessInstanceSearchQueryRequest.class);
     final ProcessInstanceFilterRequest filter = request.getFilter();
     assertThat(filter).isNotNull();
-    final LongFilterProperty processInstanceKey = filter.getProcessInstanceKey();
+    final BasicLongFilterProperty processInstanceKey = filter.getProcessInstanceKey();
     assertThat(processInstanceKey).isNotNull();
-    assertThat(processInstanceKey.get$Gt()).isEqualTo(1);
-    assertThat(processInstanceKey.get$Lt()).isEqualTo(10);
+    assertThat(processInstanceKey.get$In()).isEqualTo(Arrays.asList(1L, 10L));
   }
 
   @Test
@@ -209,7 +210,7 @@ public class QueryProcessInstanceTest extends ClientRestTest {
                     .asc()
                     .state()
                     .asc()
-                    .incident()
+                    .hasIncident()
                     .desc()
                     .tenantId()
                     .asc())
@@ -223,18 +224,18 @@ public class QueryProcessInstanceTest extends ClientRestTest {
         SearchQuerySortRequestMapper.fromProcessInstanceSearchQuerySortRequest(
             Objects.requireNonNull(request.getSort()));
     assertThat(sorts).hasSize(13);
-    assertSort(sorts.get(0), "key", SortOrderEnum.ASC);
-    assertSort(sorts.get(1), "bpmnProcessId", SortOrderEnum.DESC);
-    assertSort(sorts.get(2), "processName", SortOrderEnum.ASC);
-    assertSort(sorts.get(3), "processVersion", SortOrderEnum.ASC);
-    assertSort(sorts.get(4), "processVersionTag", SortOrderEnum.DESC);
+    assertSort(sorts.get(0), "processInstanceKey", SortOrderEnum.ASC);
+    assertSort(sorts.get(1), "processDefinitionId", SortOrderEnum.DESC);
+    assertSort(sorts.get(2), "processDefinitionName", SortOrderEnum.ASC);
+    assertSort(sorts.get(3), "processDefinitionVersion", SortOrderEnum.ASC);
+    assertSort(sorts.get(4), "processDefinitionVersionTag", SortOrderEnum.DESC);
     assertSort(sorts.get(5), "processDefinitionKey", SortOrderEnum.DESC);
     assertSort(sorts.get(6), "parentProcessInstanceKey", SortOrderEnum.ASC);
     assertSort(sorts.get(7), "parentFlowNodeInstanceKey", SortOrderEnum.ASC);
     assertSort(sorts.get(8), "startDate", SortOrderEnum.ASC);
     assertSort(sorts.get(9), "endDate", SortOrderEnum.ASC);
     assertSort(sorts.get(10), "state", SortOrderEnum.ASC);
-    assertSort(sorts.get(11), "incident", SortOrderEnum.DESC);
+    assertSort(sorts.get(11), "hasIncident", SortOrderEnum.DESC);
     assertSort(sorts.get(12), "tenantId", SortOrderEnum.ASC);
   }
 
@@ -261,6 +262,30 @@ public class QueryProcessInstanceTest extends ClientRestTest {
     assertThat(pageRequest.getLimit()).isEqualTo(5);
     assertThat(pageRequest.getSearchBefore()).isEqualTo(Collections.singletonList("b"));
     assertThat(pageRequest.getSearchAfter()).isEqualTo(Collections.singletonList("a"));
+  }
+
+  @Test
+  public void shouldConvertProcessInstanceState() {
+
+    for (final ProcessInstanceState value : ProcessInstanceState.values()) {
+      final ProcessInstanceStateEnum protocolValue = ProcessInstanceState.toProtocolState(value);
+      assertThat(protocolValue).isNotNull();
+      if (value == ProcessInstanceState.UNKNOWN_ENUM_VALUE) {
+        assertThat(protocolValue).isEqualTo(ProcessInstanceStateEnum.UNKNOWN_DEFAULT_OPEN_API);
+      } else {
+        assertThat(protocolValue.name()).isEqualTo(value.name());
+      }
+    }
+
+    for (final ProcessInstanceStateEnum protocolValue : ProcessInstanceStateEnum.values()) {
+      final ProcessInstanceState value = ProcessInstanceState.fromProtocolState(protocolValue);
+      assertThat(value).isNotNull();
+      if (protocolValue == ProcessInstanceStateEnum.UNKNOWN_DEFAULT_OPEN_API) {
+        assertThat(value).isEqualTo(ProcessInstanceState.UNKNOWN_ENUM_VALUE);
+      } else {
+        assertThat(value.name()).isEqualTo(protocolValue.name());
+      }
+    }
   }
 
   private void assertSort(

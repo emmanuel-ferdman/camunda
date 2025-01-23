@@ -14,6 +14,8 @@ import static org.assertj.core.api.Assertions.fail;
 import io.camunda.zeebe.engine.processing.clock.ClockProcessor;
 import io.camunda.zeebe.engine.processing.deployment.DeploymentCreateProcessor;
 import io.camunda.zeebe.engine.processing.identity.AuthorizationAddPermissionProcessor;
+import io.camunda.zeebe.engine.processing.identity.AuthorizationCreateProcessor;
+import io.camunda.zeebe.engine.processing.identity.AuthorizationDeleteProcessor;
 import io.camunda.zeebe.engine.processing.identity.AuthorizationRemovePermissionProcessor;
 import io.camunda.zeebe.engine.processing.identity.GroupAddEntityProcessor;
 import io.camunda.zeebe.engine.processing.identity.GroupCreateProcessor;
@@ -62,6 +64,7 @@ import io.camunda.zeebe.protocol.record.intent.RoleIntent;
 import io.camunda.zeebe.protocol.record.intent.SignalIntent;
 import io.camunda.zeebe.protocol.record.intent.TenantIntent;
 import io.camunda.zeebe.protocol.record.intent.UserIntent;
+import io.camunda.zeebe.protocol.record.value.AuthorizationOwnerType;
 import io.camunda.zeebe.protocol.record.value.AuthorizationResourceType;
 import io.camunda.zeebe.protocol.record.value.DeploymentRecordValue;
 import io.camunda.zeebe.protocol.record.value.EntityType;
@@ -131,6 +134,51 @@ public class CommandDistributionIdempotencyTest {
     return Arrays.asList(
         new Object[][] {
           {
+            "Authorization.CREATE is idempotent",
+            new Scenario(
+                ValueType.AUTHORIZATION,
+                AuthorizationIntent.CREATE,
+                () -> {
+                  final var user = createUser();
+                  ENGINE
+                      .authorization()
+                      .newAuthorization()
+                      .withOwnerKey(user.getKey())
+                      .withOwnerId(user.getValue().getUsername())
+                      .withResourceId("*")
+                      .withResourceType(AuthorizationResourceType.USER)
+                      .withPermissions(PermissionType.READ)
+                      .create();
+                },
+                2),
+            AuthorizationCreateProcessor.class
+          },
+          {
+            "Authorization.DELETE is idempotent",
+            new Scenario(
+                ValueType.AUTHORIZATION,
+                AuthorizationIntent.DELETE,
+                () -> {
+                  final var user = createUser();
+                  final var key =
+                      ENGINE
+                          .authorization()
+                          .newAuthorization()
+                          .withOwnerKey(user.getKey())
+                          .withOwnerId(user.getValue().getUsername())
+                          .withResourceId("*")
+                          .withResourceType(AuthorizationResourceType.USER)
+                          .withPermissions(PermissionType.READ)
+                          .create()
+                          .getValue()
+                          .getAuthorizationKey();
+
+                  ENGINE.authorization().deleteAuthorization(key).delete();
+                },
+                3),
+            AuthorizationDeleteProcessor.class
+          },
+          {
             "Authorization.ADD_PERMISSION is idempotent",
             new Scenario(
                 ValueType.AUTHORIZATION,
@@ -141,6 +189,8 @@ public class CommandDistributionIdempotencyTest {
                       .authorization()
                       .permission()
                       .withOwnerKey(user.getKey())
+                      .withOwnerId(user.getValue().getUsername())
+                      .withOwnerType(AuthorizationOwnerType.USER)
                       .withResourceType(AuthorizationResourceType.USER)
                       .withPermission(PermissionType.READ, "*")
                       .add();
@@ -159,6 +209,8 @@ public class CommandDistributionIdempotencyTest {
                       .authorization()
                       .permission()
                       .withOwnerKey(user.getKey())
+                      .withOwnerId(user.getValue().getUsername())
+                      .withOwnerType(AuthorizationOwnerType.USER)
                       .withResourceType(AuthorizationResourceType.USER)
                       .withPermission(PermissionType.READ, user.getValue().getUsername())
                       .remove();
@@ -404,7 +456,7 @@ public class CommandDistributionIdempotencyTest {
                 TenantIntent.DELETE,
                 () -> {
                   final var tenant = createTenant();
-                  ENGINE.tenant().deleteTenant(tenant.getKey()).delete();
+                  ENGINE.tenant().deleteTenant(tenant.getValue().getTenantId()).delete();
                 },
                 2),
             TenantDeleteProcessor.class
@@ -418,7 +470,7 @@ public class CommandDistributionIdempotencyTest {
                   final var tenant = createTenant();
                   ENGINE
                       .tenant()
-                      .updateTenant(tenant.getKey())
+                      .updateTenant(tenant.getValue().getTenantId())
                       .withName(UUID.randomUUID().toString())
                       .update();
                 },
@@ -435,8 +487,8 @@ public class CommandDistributionIdempotencyTest {
                   final var user = createUser();
                   ENGINE
                       .tenant()
-                      .addEntity(tenant.getKey())
-                      .withEntityKey(user.getKey())
+                      .addEntity(tenant.getValue().getTenantId())
+                      .withEntityId(user.getValue().getUsername())
                       .withEntityType(EntityType.USER)
                       .add();
                 },
@@ -453,8 +505,8 @@ public class CommandDistributionIdempotencyTest {
                   final var user = createUser();
                   ENGINE
                       .tenant()
-                      .addEntity(tenant.getKey())
-                      .withEntityKey(user.getKey())
+                      .addEntity(tenant.getValue().getTenantId())
+                      .withEntityId(user.getValue().getUsername())
                       .withEntityType(EntityType.USER)
                       .add();
                   ENGINE

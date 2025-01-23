@@ -15,6 +15,7 @@ import io.camunda.zeebe.model.bpmn.Bpmn;
 import io.camunda.zeebe.protocol.record.Assertions;
 import io.camunda.zeebe.protocol.record.RejectionType;
 import io.camunda.zeebe.protocol.record.intent.ProcessIntent;
+import io.camunda.zeebe.protocol.record.value.AuthorizationOwnerType;
 import io.camunda.zeebe.protocol.record.value.AuthorizationResourceType;
 import io.camunda.zeebe.protocol.record.value.PermissionType;
 import io.camunda.zeebe.protocol.record.value.UserRecordValue;
@@ -68,8 +69,7 @@ public class DeploymentCreateAuthorizationTest {
     // given
     final var processId = Strings.newRandomValidBpmnId();
     final var user = createUser();
-    addPermissionsToUser(
-        user.getUserKey(), AuthorizationResourceType.DEPLOYMENT, PermissionType.CREATE);
+    addPermissionsToUser(user, AuthorizationResourceType.RESOURCE, PermissionType.CREATE);
 
     // when
     engine
@@ -106,7 +106,7 @@ public class DeploymentCreateAuthorizationTest {
     Assertions.assertThat(rejection)
         .hasRejectionType(RejectionType.FORBIDDEN)
         .hasRejectionReason(
-            "Insufficient permissions to perform operation 'CREATE' on resource 'DEPLOYMENT'");
+            "Insufficient permissions to perform operation 'CREATE' on resource 'RESOURCE'");
   }
 
   private UserRecordValue createUser() {
@@ -121,13 +121,15 @@ public class DeploymentCreateAuthorizationTest {
   }
 
   private void addPermissionsToUser(
-      final long userKey,
+      final UserRecordValue user,
       final AuthorizationResourceType authorization,
       final PermissionType permissionType) {
     engine
         .authorization()
         .permission()
-        .withOwnerKey(userKey)
+        .withOwnerKey(user.getUserKey())
+        .withOwnerId(user.getUsername())
+        .withOwnerType(AuthorizationOwnerType.USER)
         .withResourceType(authorization)
         .withPermission(permissionType, "*")
         .add(DEFAULT_USER.getUsername());

@@ -17,14 +17,12 @@ import io.camunda.zeebe.it.util.ZeebeAssertHelper;
 import io.camunda.zeebe.qa.util.cluster.TestStandaloneBroker;
 import io.camunda.zeebe.qa.util.junit.ZeebeIntegration;
 import io.camunda.zeebe.qa.util.junit.ZeebeIntegration.TestZeebe;
-import io.camunda.zeebe.test.util.junit.AutoCloseResources;
-import io.camunda.zeebe.test.util.junit.AutoCloseResources.AutoCloseResource;
 import java.time.Duration;
+import org.junit.jupiter.api.AutoClose;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 @ZeebeIntegration
-@AutoCloseResources
 class RemoveUserFromTenantTest {
 
   private static final String TENANT_ID = "tenant-id";
@@ -32,7 +30,7 @@ class RemoveUserFromTenantTest {
   @TestZeebe
   private final TestStandaloneBroker zeebe = new TestStandaloneBroker().withRecordingExporter(true);
 
-  @AutoCloseResource private CamundaClient client;
+  @AutoClose private CamundaClient client;
 
   private long tenantKey;
   private long userKey;
@@ -52,10 +50,11 @@ class RemoveUserFromTenantTest {
             .getTenantKey();
 
     // Create User
+    final var username = "username";
     userKey =
         client
             .newUserCreateCommand()
-            .username("username")
+            .username(username)
             .name("name")
             .email("email@example.com")
             .password("password")
@@ -64,7 +63,7 @@ class RemoveUserFromTenantTest {
             .getUserKey();
 
     // Assign User to Tenant
-    client.newAssignUserToTenantCommand(tenantKey).userKey(userKey).send().join();
+    client.newAssignUserToTenantCommand(TENANT_ID).username(username).send().join();
   }
 
   @Test

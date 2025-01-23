@@ -12,6 +12,9 @@ import io.camunda.exporter.cache.ExporterEntityCacheImpl;
 import io.camunda.exporter.cache.ExporterEntityCacheProvider;
 import io.camunda.exporter.config.ConnectionTypes;
 import io.camunda.exporter.config.ExporterConfiguration;
+import io.camunda.exporter.errorhandling.Error;
+import io.camunda.exporter.errorhandling.ErrorHandler;
+import io.camunda.exporter.errorhandling.ErrorHandlers;
 import io.camunda.exporter.handlers.AuthorizationHandler;
 import io.camunda.exporter.handlers.DecisionEvaluationHandler;
 import io.camunda.exporter.handlers.DecisionHandler;
@@ -64,6 +67,8 @@ import io.camunda.exporter.handlers.VariableHandler;
 import io.camunda.exporter.handlers.operation.OperationFromIncidentHandler;
 import io.camunda.exporter.handlers.operation.OperationFromProcessInstanceHandler;
 import io.camunda.exporter.handlers.operation.OperationFromVariableDocumentHandler;
+import io.camunda.exporter.notifier.IncidentNotifier;
+import io.camunda.exporter.notifier.M2mTokenManager;
 import io.camunda.webapps.schema.descriptors.IndexDescriptor;
 import io.camunda.webapps.schema.descriptors.IndexDescriptors;
 import io.camunda.webapps.schema.descriptors.IndexTemplateDescriptor;
@@ -92,20 +97,26 @@ import io.camunda.webapps.schema.descriptors.usermanagement.index.RoleIndex;
 import io.camunda.webapps.schema.descriptors.usermanagement.index.TenantIndex;
 import io.camunda.webapps.schema.descriptors.usermanagement.index.UserIndex;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.net.http.HttpClient;
 import java.util.Collection;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.BiConsumer;
 
 /**
  * This is the class where teams should make their components such as handlers, and index/index
  * template descriptors available
  */
 public class DefaultExporterResourceProvider implements ExporterResourceProvider {
-
   private IndexDescriptors indexDescriptors;
 
   private Set<ExportHandler<?, ?>> exportHandlers;
 
   private ExporterMetadata exporterMetadata;
+  private ExecutorService executor;
+  private Map<String, ErrorHandler> indicesWithCustomErrorHandlers;
 
   @Override
   public void init(
@@ -133,6 +144,16 @@ public class DefaultExporterResourceProvider implements ExporterResourceProvider
                 indexDescriptors.get(FormIndex.class).getFullQualifiedName()),
             new ExporterCacheMetrics("form", meterRegistry));
 
+    final M2mTokenManager m2mTokenManager =
+        new M2mTokenManager(configuration.getNotifier(), HttpClient.newHttpClient());
+    executor = Executors.newVirtualThreadPerTaskExecutor();
+    final IncidentNotifier incidentNotifier =
+        new IncidentNotifier(
+            m2mTokenManager,
+            processCache,
+            configuration.getNotifier(),
+            HttpClient.newHttpClient(),
+            executor);
     exportHandlers =
         Set.of(
             new RoleCreateUpdateHandler(
@@ -186,7 +207,9 @@ public class DefaultExporterResourceProvider implements ExporterResourceProvider
             new FlowNodeInstanceFromProcessInstanceHandler(
                 indexDescriptors.get(FlowNodeInstanceTemplate.class).getFullQualifiedName()),
             new IncidentHandler(
-                indexDescriptors.get(IncidentTemplate.class).getFullQualifiedName(), processCache),
+                indexDescriptors.get(IncidentTemplate.class).getFullQualifiedName(),
+                processCache,
+                incidentNotifier),
             new SequenceFlowHandler(
                 indexDescriptors.get(SequenceFlowTemplate.class).getFullQualifiedName()),
             new DecisionEvaluationHandler(
@@ -239,6 +262,18 @@ public class DefaultExporterResourceProvider implements ExporterResourceProvider
             new JobHandler(indexDescriptors.get(JobTemplate.class).getFullQualifiedName()),
             new MigratedVariableHandler(
                 indexDescriptors.get(VariableTemplate.class).getFullQualifiedName()));
+
+    indicesWithCustomErrorHandlers =
+        Map.of(
+            indexDescriptors.get(OperationTemplate.class).getFullQualifiedName(),
+            ErrorHandlers.IGNORE_DOCUMENT_DOES_NOT_EXIST);
+  }
+
+  @Override
+  public void close() {
+    if (executor != null) {
+      executor.shutdown();
+    }
   }
 
   @Override
@@ -261,5 +296,12 @@ public class DefaultExporterResourceProvider implements ExporterResourceProvider
   public Set<ExportHandler<?, ?>> getExportHandlers() {
     // Register all handlers here
     return exportHandlers;
+  }
+
+  @Override
+  public BiConsumer<String, Error> getCustomErrorHandlers() {
+    return (index, error) -> {
+      indicesWithCustomErrorHandlers.getOrDefault(index, ErrorHandlers.THROWING).handle(error);
+    };
   }
 }

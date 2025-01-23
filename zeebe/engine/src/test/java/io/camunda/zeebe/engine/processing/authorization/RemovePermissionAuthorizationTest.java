@@ -33,20 +33,24 @@ public class RemovePermissionAuthorizationTest {
   @Test
   public void shouldRemovePermission() {
     // given
-    final var ownerKey =
+    final var owner =
         engine
             .user()
             .newUser("foo")
             .withEmail("foo@bar")
             .withName("Foo Bar")
             .withPassword("zabraboof")
-            .create()
-            .getKey();
+            .create();
+    final var ownerKey = owner.getKey();
+    final var ownerId = owner.getValue().getUsername();
+
     engine
         .authorization()
         .permission()
         .withOwnerKey(ownerKey)
-        .withResourceType(AuthorizationResourceType.DEPLOYMENT)
+        .withOwnerId(ownerId)
+        .withOwnerType(AuthorizationOwnerType.USER)
+        .withResourceType(AuthorizationResourceType.RESOURCE)
         .withPermission(PermissionType.CREATE, "foo")
         .withPermission(PermissionType.DELETE_PROCESS, "bar")
         .add()
@@ -58,7 +62,9 @@ public class RemovePermissionAuthorizationTest {
             .authorization()
             .permission()
             .withOwnerKey(ownerKey)
-            .withResourceType(AuthorizationResourceType.DEPLOYMENT)
+            .withOwnerId(ownerId)
+            .withOwnerType(AuthorizationOwnerType.USER)
+            .withResourceType(AuthorizationResourceType.RESOURCE)
             .withPermission(PermissionType.CREATE, "foo")
             .withPermission(PermissionType.DELETE_PROCESS, "bar")
             .remove()
@@ -70,8 +76,7 @@ public class RemovePermissionAuthorizationTest {
             AuthorizationRecordValue::getOwnerKey,
             AuthorizationRecordValue::getOwnerType,
             AuthorizationRecordValue::getResourceType)
-        .containsExactly(
-            ownerKey, AuthorizationOwnerType.USER, AuthorizationResourceType.DEPLOYMENT);
+        .containsExactly(ownerKey, AuthorizationOwnerType.USER, AuthorizationResourceType.RESOURCE);
     assertThat(response.getPermissions())
         .extracting(PermissionValue::getPermissionType, PermissionValue::getResourceIds)
         .containsExactly(
@@ -83,6 +88,7 @@ public class RemovePermissionAuthorizationTest {
   public void shouldRejectIfNoOwnerExists() {
     // given no user
     final var ownerKey = 1L;
+    final var ownerId = "bar";
 
     // when
     final var rejection =
@@ -90,7 +96,9 @@ public class RemovePermissionAuthorizationTest {
             .authorization()
             .permission()
             .withOwnerKey(ownerKey)
-            .withResourceType(AuthorizationResourceType.DEPLOYMENT)
+            .withOwnerId(ownerId)
+            .withOwnerType(AuthorizationOwnerType.USER)
+            .withResourceType(AuthorizationResourceType.RESOURCE)
             .withPermission(PermissionType.CREATE, "foo")
             .expectRejection()
             .remove();
@@ -106,20 +114,24 @@ public class RemovePermissionAuthorizationTest {
   @Test
   public void shouldRejectIfPermissionDoesNotExist() {
     // given
-    final var ownerKey =
+    final var owner =
         engine
             .user()
             .newUser("foo")
             .withEmail("foo@bar")
             .withName("Foo Bar")
             .withPassword("zabraboof")
-            .create()
-            .getKey();
+            .create();
+    final var ownerKey = owner.getKey();
+    final var ownerId = owner.getValue().getUsername();
+
     engine
         .authorization()
         .permission()
         .withOwnerKey(ownerKey)
-        .withResourceType(AuthorizationResourceType.DEPLOYMENT)
+        .withOwnerId(ownerId)
+        .withOwnerType(AuthorizationOwnerType.USER)
+        .withResourceType(AuthorizationResourceType.RESOURCE)
         .withPermission(PermissionType.CREATE, "foo")
         .withPermission(PermissionType.DELETE_PROCESS, "bar")
         .add()
@@ -131,7 +143,9 @@ public class RemovePermissionAuthorizationTest {
             .authorization()
             .permission()
             .withOwnerKey(ownerKey)
-            .withResourceType(AuthorizationResourceType.DEPLOYMENT)
+            .withOwnerId(ownerId)
+            .withOwnerType(AuthorizationOwnerType.USER)
+            .withResourceType(AuthorizationResourceType.RESOURCE)
             .withPermission(PermissionType.DELETE_PROCESS, "foo", "bar")
             .expectRejection()
             .remove();
@@ -144,7 +158,7 @@ public class RemovePermissionAuthorizationTest {
             "Expected to remove '%s' permission for resource '%s' and resource identifiers '%s' for owner '%s', but this permission for resource identifiers '%s' is not found. Existing resource ids are: '%s'"
                 .formatted(
                     PermissionType.DELETE_PROCESS,
-                    AuthorizationResourceType.DEPLOYMENT,
+                    AuthorizationResourceType.RESOURCE,
                     "[bar, foo]",
                     ownerKey,
                     "[foo]",
@@ -154,22 +168,26 @@ public class RemovePermissionAuthorizationTest {
   @Test
   public void shouldRejectIfPermissionIsOnlyInheritedFromRole() {
     // given
-    final var userKey =
+    final var user =
         engine
             .user()
             .newUser("foo")
             .withEmail("foo@bar")
             .withName("Foo Bar")
             .withPassword("zabraboof")
-            .create()
-            .getKey();
+            .create();
+    final var userKey = user.getKey();
+    final var userId = user.getValue().getUsername();
     final var roleKey = engine.role().newRole("role").create().getKey();
+    final var roleId = String.valueOf(roleKey);
 
     engine
         .authorization()
         .permission()
         .withOwnerKey(roleKey)
-        .withResourceType(AuthorizationResourceType.DEPLOYMENT)
+        .withOwnerId(roleId)
+        .withOwnerType(AuthorizationOwnerType.ROLE)
+        .withResourceType(AuthorizationResourceType.RESOURCE)
         .withPermission(PermissionType.CREATE, "foo")
         .withPermission(PermissionType.DELETE_PROCESS, "bar")
         .add()
@@ -182,7 +200,9 @@ public class RemovePermissionAuthorizationTest {
             .authorization()
             .permission()
             .withOwnerKey(userKey)
-            .withResourceType(AuthorizationResourceType.DEPLOYMENT)
+            .withOwnerId(userId)
+            .withOwnerType(AuthorizationOwnerType.USER)
+            .withResourceType(AuthorizationResourceType.RESOURCE)
             .withPermission(PermissionType.DELETE_PROCESS, "foo", "bar")
             .expectRejection()
             .remove();
@@ -195,7 +215,7 @@ public class RemovePermissionAuthorizationTest {
             "Expected to remove '%s' permission for resource '%s' and resource identifiers '%s' for owner '%s', but this permission for resource identifiers '%s' is not found. Existing resource ids are: '%s'"
                 .formatted(
                     PermissionType.DELETE_PROCESS,
-                    AuthorizationResourceType.DEPLOYMENT,
+                    AuthorizationResourceType.RESOURCE,
                     "[bar, foo]",
                     userKey,
                     "[bar, foo]",
@@ -205,22 +225,26 @@ public class RemovePermissionAuthorizationTest {
   @Test
   public void shouldRejectIfPermissionIsOnlyInheritedFromGroup() {
     // given
-    final var userKey =
+    final var user =
         engine
             .user()
             .newUser("foo")
             .withEmail("foo@bar")
             .withName("Foo Bar")
             .withPassword("zabraboof")
-            .create()
-            .getKey();
+            .create();
+    final var userKey = user.getKey();
+    final var userId = user.getValue().getUsername();
     final var groupKey = engine.group().newGroup("role").create().getKey();
+    final var groupId = String.valueOf(groupKey);
 
     engine
         .authorization()
         .permission()
         .withOwnerKey(groupKey)
-        .withResourceType(AuthorizationResourceType.DEPLOYMENT)
+        .withOwnerId(groupId)
+        .withOwnerType(AuthorizationOwnerType.GROUP)
+        .withResourceType(AuthorizationResourceType.RESOURCE)
         .withPermission(PermissionType.CREATE, "foo")
         .withPermission(PermissionType.DELETE_PROCESS, "bar")
         .add()
@@ -233,7 +257,9 @@ public class RemovePermissionAuthorizationTest {
             .authorization()
             .permission()
             .withOwnerKey(userKey)
-            .withResourceType(AuthorizationResourceType.DEPLOYMENT)
+            .withOwnerId(userId)
+            .withOwnerType(AuthorizationOwnerType.USER)
+            .withResourceType(AuthorizationResourceType.RESOURCE)
             .withPermission(PermissionType.DELETE_PROCESS, "foo", "bar")
             .expectRejection()
             .remove();
@@ -246,7 +272,7 @@ public class RemovePermissionAuthorizationTest {
             "Expected to remove '%s' permission for resource '%s' and resource identifiers '%s' for owner '%s', but this permission for resource identifiers '%s' is not found. Existing resource ids are: '%s'"
                 .formatted(
                     PermissionType.DELETE_PROCESS,
-                    AuthorizationResourceType.DEPLOYMENT,
+                    AuthorizationResourceType.RESOURCE,
                     "[bar, foo]",
                     userKey,
                     "[bar, foo]",

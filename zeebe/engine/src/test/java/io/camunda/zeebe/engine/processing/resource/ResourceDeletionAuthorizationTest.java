@@ -15,6 +15,7 @@ import io.camunda.zeebe.model.bpmn.Bpmn;
 import io.camunda.zeebe.protocol.record.Assertions;
 import io.camunda.zeebe.protocol.record.RejectionType;
 import io.camunda.zeebe.protocol.record.intent.ResourceDeletionIntent;
+import io.camunda.zeebe.protocol.record.value.AuthorizationOwnerType;
 import io.camunda.zeebe.protocol.record.value.AuthorizationResourceType;
 import io.camunda.zeebe.protocol.record.value.PermissionType;
 import io.camunda.zeebe.protocol.record.value.UserRecordValue;
@@ -69,10 +70,7 @@ public class ResourceDeletionAuthorizationTest {
     final var processDefinitionKey = deployProcessDefinition(processId);
     final var user = createUser();
     addPermissionsToUser(
-        user.getUserKey(),
-        AuthorizationResourceType.DEPLOYMENT,
-        PermissionType.DELETE_PROCESS,
-        processId);
+        user, AuthorizationResourceType.RESOURCE, PermissionType.DELETE_PROCESS, processId);
 
     // when
     engine.resourceDeletion().withResourceKey(processDefinitionKey).delete(user.getUsername());
@@ -106,7 +104,7 @@ public class ResourceDeletionAuthorizationTest {
                 .getFirst())
         .hasRejectionType(RejectionType.FORBIDDEN)
         .hasRejectionReason(
-            "Insufficient permissions to perform operation 'DELETE_PROCESS' on resource 'DEPLOYMENT', required resource identifiers are one of '[*, %s]'"
+            "Insufficient permissions to perform operation 'DELETE_PROCESS' on resource 'RESOURCE', required resource identifiers are one of '[*, %s]'"
                 .formatted(processId));
   }
 
@@ -133,7 +131,7 @@ public class ResourceDeletionAuthorizationTest {
     final var drdKey = deployDrd();
     final var user = createUser();
     addPermissionsToUser(
-        user.getUserKey(), AuthorizationResourceType.DEPLOYMENT, PermissionType.DELETE_DRD, drdId);
+        user, AuthorizationResourceType.RESOURCE, PermissionType.DELETE_DRD, drdId);
 
     // when
     engine.resourceDeletion().withResourceKey(drdKey).delete(user.getUsername());
@@ -163,7 +161,7 @@ public class ResourceDeletionAuthorizationTest {
                 .getFirst())
         .hasRejectionType(RejectionType.FORBIDDEN)
         .hasRejectionReason(
-            "Insufficient permissions to perform operation 'DELETE_DRD' on resource 'DEPLOYMENT', required resource identifiers are one of '[*, %s]'"
+            "Insufficient permissions to perform operation 'DELETE_DRD' on resource 'RESOURCE', required resource identifiers are one of '[*, %s]'"
                 .formatted(drdId));
   }
 
@@ -190,10 +188,7 @@ public class ResourceDeletionAuthorizationTest {
     final var formKey = deployForm();
     final var user = createUser();
     addPermissionsToUser(
-        user.getUserKey(),
-        AuthorizationResourceType.DEPLOYMENT,
-        PermissionType.DELETE_FORM,
-        formId);
+        user, AuthorizationResourceType.RESOURCE, PermissionType.DELETE_FORM, formId);
 
     // when
     engine.resourceDeletion().withResourceKey(formKey).delete(user.getUsername());
@@ -223,7 +218,7 @@ public class ResourceDeletionAuthorizationTest {
                 .getFirst())
         .hasRejectionType(RejectionType.FORBIDDEN)
         .hasRejectionReason(
-            "Insufficient permissions to perform operation 'DELETE_FORM' on resource 'DEPLOYMENT', required resource identifiers are one of '[*, %s]'"
+            "Insufficient permissions to perform operation 'DELETE_FORM' on resource 'RESOURCE', required resource identifiers are one of '[*, %s]'"
                 .formatted(formId));
   }
 
@@ -239,14 +234,16 @@ public class ResourceDeletionAuthorizationTest {
   }
 
   private void addPermissionsToUser(
-      final long userKey,
+      final UserRecordValue user,
       final AuthorizationResourceType authorization,
       final PermissionType permissionType,
       final String... resourceIds) {
     engine
         .authorization()
         .permission()
-        .withOwnerKey(userKey)
+        .withOwnerKey(user.getUserKey())
+        .withOwnerId(user.getUsername())
+        .withOwnerType(AuthorizationOwnerType.USER)
         .withResourceType(authorization)
         .withPermission(permissionType, resourceIds)
         .add(DEFAULT_USER.getUsername());

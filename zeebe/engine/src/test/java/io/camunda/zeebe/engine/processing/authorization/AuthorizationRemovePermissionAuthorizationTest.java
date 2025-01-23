@@ -14,6 +14,7 @@ import io.camunda.zeebe.engine.util.EngineRule;
 import io.camunda.zeebe.protocol.record.Assertions;
 import io.camunda.zeebe.protocol.record.RejectionType;
 import io.camunda.zeebe.protocol.record.intent.AuthorizationIntent;
+import io.camunda.zeebe.protocol.record.value.AuthorizationOwnerType;
 import io.camunda.zeebe.protocol.record.value.AuthorizationResourceType;
 import io.camunda.zeebe.protocol.record.value.PermissionType;
 import io.camunda.zeebe.protocol.record.value.UserRecordValue;
@@ -32,7 +33,6 @@ public class AuthorizationRemovePermissionAuthorizationTest {
           UUID.randomUUID().toString(),
           UUID.randomUUID().toString(),
           UUID.randomUUID().toString());
-  private static long defaultUserKey = -1L;
 
   @Rule
   public final EngineRule engine =
@@ -46,16 +46,18 @@ public class AuthorizationRemovePermissionAuthorizationTest {
   public void shouldBeAuthorizedToRemovePermissionsWithDefaultUser() {
     // given
     final var resourceId = "resourceId";
-    final var resourceType = AuthorizationResourceType.DEPLOYMENT;
+    final var resourceType = AuthorizationResourceType.RESOURCE;
     final var permissionType = PermissionType.CREATE;
     final var user = createUser();
-    addPermissionsToUser(user.getUserKey(), resourceType, permissionType, resourceId);
+    addPermissionsToUser(user, resourceType, permissionType, resourceId);
 
     // when
     engine
         .authorization()
         .permission()
         .withOwnerKey(user.getUserKey())
+        .withOwnerId(user.getUsername())
+        .withOwnerType(AuthorizationOwnerType.USER)
         .withResourceType(resourceType)
         .withPermission(permissionType, resourceId)
         .remove(DEFAULT_USER.getUsername());
@@ -75,13 +77,15 @@ public class AuthorizationRemovePermissionAuthorizationTest {
     final var resourceType = AuthorizationResourceType.AUTHORIZATION;
     final var permissionType = PermissionType.UPDATE;
     final var user = createUser();
-    addPermissionsToUser(user.getUserKey(), resourceType, permissionType, resourceId, "*");
+    addPermissionsToUser(user, resourceType, permissionType, resourceId, "*");
 
     // when
     engine
         .authorization()
         .permission()
         .withOwnerKey(user.getUserKey())
+        .withOwnerId(user.getUsername())
+        .withOwnerType(AuthorizationOwnerType.USER)
         .withResourceType(resourceType)
         .withPermission(permissionType, resourceId)
         .remove(user.getUsername());
@@ -105,7 +109,9 @@ public class AuthorizationRemovePermissionAuthorizationTest {
             .authorization()
             .permission()
             .withOwnerKey(user.getUserKey())
-            .withResourceType(AuthorizationResourceType.DEPLOYMENT)
+            .withOwnerId(user.getUsername())
+            .withOwnerType(AuthorizationOwnerType.USER)
+            .withResourceType(AuthorizationResourceType.RESOURCE)
             .withPermission(PermissionType.DELETE, "*")
             .expectRejection()
             .remove(user.getUsername());
@@ -129,14 +135,16 @@ public class AuthorizationRemovePermissionAuthorizationTest {
   }
 
   private void addPermissionsToUser(
-      final long userKey,
+      final UserRecordValue user,
       final AuthorizationResourceType authorization,
       final PermissionType permissionType,
       final String... resourceIds) {
     engine
         .authorization()
         .permission()
-        .withOwnerKey(userKey)
+        .withOwnerKey(user.getUserKey())
+        .withOwnerId(user.getUsername())
+        .withOwnerType(AuthorizationOwnerType.USER)
         .withResourceType(authorization)
         .withPermission(permissionType, resourceIds)
         .add(DEFAULT_USER.getUsername());

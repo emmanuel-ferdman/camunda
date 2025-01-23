@@ -137,6 +137,8 @@ public class CamundaExporter implements Exporter {
 
   @Override
   public void close() {
+    provider.close();
+
     if (writer != null) {
       try {
         flush();
@@ -163,7 +165,7 @@ public class CamundaExporter implements Exporter {
 
     final var recordVersion = getVersion(record.getBrokerVersion());
 
-    if (recordVersion.major() == 8 && recordVersion.minor() < 7) {
+    if (recordVersion.major() == 8 && recordVersion.minor() < 8) {
       LOG.debug(
           "Skip record with broker version '{}'. Last exported position will be updated to '{}'",
           record.getBrokerVersion(),
@@ -236,6 +238,7 @@ public class CamundaExporter implements Exporter {
   private ExporterBatchWriter createBatchWriter() {
     final var builder = ExporterBatchWriter.Builder.begin();
     provider.getExportHandlers().forEach(builder::withHandler);
+    builder.withCustomErrorHandlers(provider.getCustomErrorHandlers());
     return builder.build();
   }
 

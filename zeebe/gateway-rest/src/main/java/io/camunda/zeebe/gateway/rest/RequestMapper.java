@@ -775,14 +775,23 @@ public class RequestMapper {
     return getResult(
         TenantRequestValidator.validateTenantCreateRequest(tenantCreateRequest),
         () ->
-            new TenantDTO(null, tenantCreateRequest.getTenantId(), tenantCreateRequest.getName()));
+            new TenantDTO(
+                null,
+                tenantCreateRequest.getTenantId(),
+                tenantCreateRequest.getName(),
+                tenantCreateRequest.getDescription()));
   }
 
   public static Either<ProblemDetail, TenantDTO> toTenantUpdateDto(
-      final Long tenantKey, final TenantUpdateRequest tenantUpdateRequest) {
+      final String tenantId, final TenantUpdateRequest tenantUpdateRequest) {
     return getResult(
         TenantRequestValidator.validateTenantUpdateRequest(tenantUpdateRequest),
-        () -> new TenantDTO(tenantKey, null, tenantUpdateRequest.getName()));
+        () ->
+            new TenantDTO(
+                null,
+                tenantId,
+                tenantUpdateRequest.getName(),
+                tenantUpdateRequest.getDescription()));
   }
 
   private static List<ProcessInstanceModificationActivateInstruction>

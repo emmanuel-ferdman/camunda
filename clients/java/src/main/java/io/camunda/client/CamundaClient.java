@@ -38,6 +38,7 @@ import io.camunda.client.api.command.CreateProcessInstanceCommandStep1;
 import io.camunda.client.api.command.CreateRoleCommandStep1;
 import io.camunda.client.api.command.CreateTenantCommandStep1;
 import io.camunda.client.api.command.CreateUserCommandStep1;
+import io.camunda.client.api.command.DeleteAuthorizationCommandStep1;
 import io.camunda.client.api.command.DeleteDocumentCommandStep1;
 import io.camunda.client.api.command.DeleteGroupCommandStep1;
 import io.camunda.client.api.command.DeleteResourceCommandStep1;
@@ -1526,15 +1527,15 @@ public interface CamundaClient extends AutoCloseable, JobClient {
    *
    * <pre>
    * camundaClient
-   *   .newUpdateTenantCommand(12345L) // Specify the tenant key
+   *   .newUpdateTenantCommand("my-tenant-id") // Specify the tenant id
    *   .name("Updated Tenant Name")   // Set the new tenant name
    *   .send();                       // Send the command to the broker
    * </pre>
    *
-   * @param tenantKey the unique identifier of the tenant to be updated
+   * @param tenantId the unique identifier of the tenant to be updated
    * @return a builder to configure and send the update tenant command
    */
-  UpdateTenantCommandStep1 newUpdateTenantCommand(long tenantKey);
+  UpdateTenantCommandStep1 newUpdateTenantCommand(String tenantId);
 
   /**
    * Command to delete a tenant.
@@ -1545,10 +1546,10 @@ public interface CamundaClient extends AutoCloseable, JobClient {
    *  .send();
    * </pre>
    *
-   * @param tenantKey the key of the tenant to delete
+   * @param tenantId the id of the tenant to delete
    * @return a builder for the delete tenant command
    */
-  DeleteTenantCommandStep1 newDeleteTenantCommand(long tenantKey);
+  DeleteTenantCommandStep1 newDeleteTenantCommand(String tenantId);
 
   /**
    * Command to assign a mapping rule to a tenant.
@@ -1577,17 +1578,17 @@ public interface CamundaClient extends AutoCloseable, JobClient {
    *
    * <pre>
    * camundaClient
-   *   .newAssignUserToTenantCommand(tenantKey)
-   *   .userKey(userKey)
+   *   .newAssignUserToTenantCommand(tenantId)
+   *   .username(username)
    *   .send();
    * </pre>
    *
    * <p>This command sends an HTTP PUT request to assign the specified user to the given tenant.
    *
-   * @param tenantKey the unique identifier of the tenant
+   * @param tenantId the unique identifier of the tenant
    * @return a builder for the assign user to tenant command
    */
-  AssignUserToTenantCommandStep1 newAssignUserToTenantCommand(long tenantKey);
+  AssignUserToTenantCommandStep1 newAssignUserToTenantCommand(String tenantId);
 
   /**
    * Command to remove a user from a tenant.
@@ -1662,4 +1663,20 @@ public interface CamundaClient extends AutoCloseable, JobClient {
    * @return a builder to configure and send the create authorization command
    */
   CreateAuthorizationCommandStep1 newCreateAuthorizationCommand();
+
+  /**
+   * Command to delete an authorization
+   *
+   * <p>Example usage:
+   *
+   * <pre>
+   * camundaClient
+   *   .newDeleteAuthorizationCommand(authorizationKey)
+   *   .send();
+   * </pre>
+   *
+   * @param authorizationKey the key of the authorization to delete
+   * @return a builder to configure and send the delete authorization command
+   */
+  DeleteAuthorizationCommandStep1 newDeleteAuthorizationCommand(long authorizationKey);
 }
