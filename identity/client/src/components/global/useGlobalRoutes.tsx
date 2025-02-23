@@ -4,6 +4,8 @@ import Users from "src/pages/users";
 import Groups from "src/pages/groups";
 import Roles from "src/pages/roles";
 import Tenants from "src/pages/tenants";
+import Mappings from "src/pages/mappings";
+import Authorizations from "src/pages/authorizations";
 
 export const useGlobalRoutes = () => {
   const { t } = useTranslate();
@@ -32,6 +34,18 @@ export const useGlobalRoutes = () => {
       key: "/tenants",
       label: t("Tenants"),
       element: <Tenants />,
+    },
+    {
+      path: "/mappings/*",
+      key: "/mappings",
+      label: t("Mappings"),
+      element: <Mappings />,
+    },
+    {
+      path: "/authorizations/*",
+      key: "/authorizations",
+      label: t("Authorizations"),
+      element: <Authorizations />,
     },
   ];
 

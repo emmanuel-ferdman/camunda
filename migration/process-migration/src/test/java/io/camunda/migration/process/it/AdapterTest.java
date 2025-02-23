@@ -20,10 +20,12 @@ import co.elastic.clients.elasticsearch.core.IndexRequest;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.camunda.exporter.config.ExporterConfiguration.IndexSettings;
 import io.camunda.exporter.schema.elasticsearch.ElasticsearchEngineClient;
 import io.camunda.exporter.schema.opensearch.OpensearchEngineClient;
 import io.camunda.migration.process.MigrationRunner;
+import io.camunda.migration.process.TestData;
 import io.camunda.migration.process.adapter.MigrationRepositoryIndex;
 import io.camunda.migration.process.adapter.ProcessorStep;
 import io.camunda.migration.process.config.ProcessMigrationProperties;
@@ -42,6 +44,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -53,10 +56,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
 public abstract class AdapterTest {
-
+  protected static final String MISCONFIGURED_PREFIX = "misconfigured";
   protected static ProcessIndex processIndex;
   protected static MigrationRepositoryIndex migrationRepositoryIndex;
   protected static ImportPositionIndex importPositionIndex;
+  protected static TestData.MisconfiguredProcessIndex misconfiguredProcessIndex;
   protected static ProcessMigrationProperties properties;
   protected static ElasticsearchClient esClient;
   protected static OpenSearchClient osClient;
@@ -75,6 +79,9 @@ public abstract class AdapterTest {
   private static final OpensearchContainer<?> OS_CONTAINER =
       TestSearchContainers.createDefaultOpensearchContainer();
 
+  private static ObjectMapper esObjectMapper;
+  private static ObjectMapper osObjectMapper;
+
   protected boolean isElasticsearch = true;
 
   @BeforeAll
@@ -87,31 +94,40 @@ public abstract class AdapterTest {
     ES_CONFIGURATION.setUrl("http://localhost:" + ES_CONTAINER.getMappedPort(9200));
     OS_CONFIGURATION.setType("opensearch");
     OS_CONFIGURATION.setUrl("http://localhost:" + OS_CONTAINER.getMappedPort(9200));
-    esClient = new ElasticsearchConnector(ES_CONFIGURATION).createClient();
-    osClient = new OpensearchConnector(OS_CONFIGURATION).createClient();
+    final var esConnector = new ElasticsearchConnector(ES_CONFIGURATION);
+    esObjectMapper = esConnector.objectMapper();
+    esClient = esConnector.createClient();
+    final var osConnector = new OpensearchConnector(OS_CONFIGURATION);
+    osObjectMapper = osConnector.objectMapper();
+    osClient = osConnector.createClient();
     esMigrator = new MigrationRunner(properties, ES_CONFIGURATION, meterRegistry);
     osMigrator = new MigrationRunner(properties, OS_CONFIGURATION, meterRegistry);
     createIndices();
   }
 
   private static void createIndices() {
-    final OpensearchEngineClient osEngine = new OpensearchEngineClient(osClient);
+    final OpensearchEngineClient osEngine = new OpensearchEngineClient(osClient, osObjectMapper);
     processIndex = new ProcessIndex(ES_CONFIGURATION.getIndexPrefix(), false);
     migrationRepositoryIndex =
         new MigrationRepositoryIndex(ES_CONFIGURATION.getIndexPrefix(), false);
     importPositionIndex = new ImportPositionIndex(ES_CONFIGURATION.getIndexPrefix(), false);
+    misconfiguredProcessIndex = new TestData.MisconfiguredProcessIndex(MISCONFIGURED_PREFIX, false);
     osEngine.createIndex(processIndex, new IndexSettings());
     osEngine.createIndex(migrationRepositoryIndex, new IndexSettings());
     osEngine.createIndex(importPositionIndex, new IndexSettings());
+    osEngine.createIndex(misconfiguredProcessIndex, new IndexSettings());
 
-    final ElasticsearchEngineClient esEngine = new ElasticsearchEngineClient(esClient);
+    final ElasticsearchEngineClient esEngine =
+        new ElasticsearchEngineClient(esClient, esObjectMapper);
     processIndex = new ProcessIndex(ES_CONFIGURATION.getIndexPrefix(), true);
     migrationRepositoryIndex =
         new MigrationRepositoryIndex(ES_CONFIGURATION.getIndexPrefix(), true);
     importPositionIndex = new ImportPositionIndex(ES_CONFIGURATION.getIndexPrefix(), true);
+    misconfiguredProcessIndex = new TestData.MisconfiguredProcessIndex(MISCONFIGURED_PREFIX, true);
     esEngine.createIndex(processIndex, new IndexSettings());
     esEngine.createIndex(migrationRepositoryIndex, new IndexSettings());
     esEngine.createIndex(importPositionIndex, new IndexSettings());
+    esEngine.createIndex(misconfiguredProcessIndex, new IndexSettings());
   }
 
   @AfterEach
@@ -125,7 +141,8 @@ public abstract class AdapterTest {
                   d.index(
                           processIndex.getFullQualifiedName(),
                           migrationRepositoryIndex.getFullQualifiedName(),
-                          importPositionIndex.getFullQualifiedName())
+                          importPositionIndex.getFullQualifiedName(),
+                          misconfiguredProcessIndex.getFullQualifiedName())
                       .conflicts(Conflicts.Proceed)
                       .query(q -> q.matchAll(m -> m))));
       esClient.indices().refresh();
@@ -138,7 +155,8 @@ public abstract class AdapterTest {
                   d.index(
                           processIndex.getFullQualifiedName(),
                           migrationRepositoryIndex.getFullQualifiedName(),
-                          importPositionIndex.getFullQualifiedName())
+                          importPositionIndex.getFullQualifiedName(),
+                          misconfiguredProcessIndex.getFullQualifiedName())
                       .conflicts(org.opensearch.client.opensearch._types.Conflicts.Proceed)
                       .query(q -> q.matchAll(m -> m))));
       osClient.indices().refresh();
@@ -158,6 +176,37 @@ public abstract class AdapterTest {
       esClient.indices().refresh();
     } else {
       osClient.indices().refresh();
+    }
+  }
+
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  protected void writeToMisconfiguredProcessToIndex(final ProcessEntity entity) throws IOException {
+    final var document =
+        Map.of(
+            "id",
+            entity.getId(),
+            "key",
+            entity.getKey(),
+            "bpmnXml",
+            entity.getBpmnXml(),
+            "version",
+            entity.getVersion(),
+            "bpmnProcessId",
+            entity.getBpmnProcessId());
+    if (isElasticsearch) {
+      esClient.index(
+          new co.elastic.clients.elasticsearch.core.IndexRequest.Builder()
+              .index(misconfiguredProcessIndex.getFullQualifiedName())
+              .document(document)
+              .id(entity.getId())
+              .build());
+    } else {
+      osClient.index(
+          new org.opensearch.client.opensearch.core.IndexRequest.Builder<>()
+              .index(misconfiguredProcessIndex.getFullQualifiedName())
+              .document(document)
+              .id(entity.getId())
+              .build());
     }
   }
 

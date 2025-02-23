@@ -11,7 +11,7 @@ import static io.camunda.security.configuration.InitializationConfiguration.DEFA
 import static io.camunda.security.configuration.InitializationConfiguration.DEFAULT_USER_USERNAME;
 
 import io.camunda.client.CamundaClient;
-import io.camunda.client.CredentialsProvider;
+import io.camunda.client.impl.basicauth.BasicAuthCredentialsProviderBuilder;
 import io.camunda.client.protocol.rest.OwnerTypeEnum;
 import io.camunda.client.protocol.rest.PermissionTypeEnum;
 import io.camunda.client.protocol.rest.ResourceTypeEnum;
@@ -25,7 +25,6 @@ import io.camunda.zeebe.qa.util.cluster.TestGateway;
 import io.camunda.zeebe.util.CloseableSilently;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.List;
 import java.util.function.Supplier;
 import org.awaitility.Awaitility;
@@ -75,28 +74,11 @@ public class AuthorizationsUtil implements CloseableSilently {
             .send()
             .join();
     awaitUserExistsInElasticsearch(username);
-    createPermissions(userCreateResponse.getUserKey(), username, permissions);
+    createPermissions(username, permissions);
     return userCreateResponse.getUserKey();
   }
 
-  public void createPermissions(final long userKey, final Permissions... permissions) {
-    for (final Permissions permission : permissions) {
-      client
-          .newAddPermissionsCommand(userKey)
-          .resourceType(permission.resourceType())
-          .permission(permission.permissionType())
-          .resourceIds(permission.resourceIds())
-          .send()
-          .join();
-    }
-    if (permissions != null && permissions.length > 0) {
-      awaitPermissionExistsInElasticsearch(userKey, Arrays.asList(permissions).getLast());
-    }
-  }
-
-  // TODO: use for authorization creation based on owner Type + ID
-  public void createPermissions(
-      final long userKey, final String username, final Permissions... permissions) {
+  public void createPermissions(final String username, final Permissions... permissions) {
     for (final Permissions permission : permissions) {
       for (final String resourceId : permission.resourceIds()) {
         client
@@ -105,13 +87,13 @@ public class AuthorizationsUtil implements CloseableSilently {
             .ownerType(OwnerTypeEnum.USER)
             .resourceId(resourceId)
             .resourceType(permission.resourceType())
-            .permission(permission.permissionType())
+            .permissionTypes(permission.permissionType())
             .send()
             .join();
       }
     }
-    if (permissions != null && permissions.length > 0) {
-      awaitPermissionExistsInElasticsearch(userKey, Arrays.asList(permissions).getLast());
+    if (permissions.length > 0) {
+      awaitPermissionExistsInElasticsearch(username, Arrays.asList(permissions).getLast());
     }
   }
 
@@ -151,22 +133,7 @@ public class AuthorizationsUtil implements CloseableSilently {
         .preferRestOverGrpc(true)
         .defaultRequestTimeout(Duration.ofSeconds(15))
         .credentialsProvider(
-            new CredentialsProvider() {
-              @Override
-              public void applyCredentials(final CredentialsApplier applier) {
-                applier.put(
-                    "Authorization",
-                    "Basic %s"
-                        .formatted(
-                            Base64.getEncoder()
-                                .encodeToString("%s:%s".formatted(username, password).getBytes())));
-              }
-
-              @Override
-              public boolean shouldRetryRequest(final StatusCode statusCode) {
-                return false;
-              }
-            })
+            new BasicAuthCredentialsProviderBuilder().username(username).password(password).build())
         .build();
   }
 
@@ -177,22 +144,7 @@ public class AuthorizationsUtil implements CloseableSilently {
         .defaultRequestTimeout(Duration.ofSeconds(15))
         .preferRestOverGrpc(false)
         .credentialsProvider(
-            new CredentialsProvider() {
-              @Override
-              public void applyCredentials(final CredentialsApplier applier) {
-                applier.put(
-                    "Authorization",
-                    "Basic %s"
-                        .formatted(
-                            Base64.getEncoder()
-                                .encodeToString("%s:%s".formatted(username, password).getBytes())));
-              }
-
-              @Override
-              public boolean shouldRetryRequest(final StatusCode statusCode) {
-                return false;
-              }
-            })
+            new BasicAuthCredentialsProviderBuilder().username(username).password(password).build())
         .build();
   }
 
@@ -207,7 +159,7 @@ public class AuthorizationsUtil implements CloseableSilently {
   }
 
   private void awaitPermissionExistsInElasticsearch(
-      final long userKey, final Permissions permissions) {
+      final String username, final Permissions permissions) {
     final var resourceType = permissions.resourceType().getValue();
     final var permissionType = PermissionType.valueOf(permissions.permissionType().getValue());
     final var resourceIds = permissions.resourceIds();
@@ -217,9 +169,9 @@ public class AuthorizationsUtil implements CloseableSilently {
             b ->
                 b.filter(
                     f ->
-                        f.ownerKeys(userKey)
+                        f.ownerIds(username)
                             .resourceType(resourceType)
-                            .permissionType(permissionType)
+                            .permissionTypes(permissionType)
                             .resourceIds(resourceIds)));
 
     awaitEntityExistsInElasticsearch(() -> searchClients.searchAuthorizations(permissionQuery));

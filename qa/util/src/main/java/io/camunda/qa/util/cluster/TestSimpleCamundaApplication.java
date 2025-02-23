@@ -13,6 +13,7 @@ import io.camunda.application.commons.CommonsModuleConfiguration;
 import io.camunda.application.commons.configuration.BrokerBasedConfiguration.BrokerBasedProperties;
 import io.camunda.application.commons.security.CamundaSecurityConfiguration.CamundaSecurityProperties;
 import io.camunda.application.initializers.WebappsConfigurationInitializer;
+import io.camunda.authentication.config.AuthenticationProperties;
 import io.camunda.client.CamundaClientBuilder;
 import io.camunda.operate.OperateModuleConfiguration;
 import io.camunda.security.configuration.ConfiguredUser;
@@ -121,6 +122,14 @@ public final class TestSimpleCamundaApplication
   }
 
   @Override
+  public TestSimpleCamundaApplication withProperty(final String key, final Object value) {
+    // Since the security config is not constructed from the properties, we need to manually update
+    // it when we override a property.
+    AuthenticationProperties.applyToSecurityConfig(securityConfig, key, value);
+    return super.withProperty(key, value);
+  }
+
+  @Override
   protected SpringApplicationBuilder createSpringBuilder() {
     // because @ConditionalOnRestGatewayEnabled relies on the zeebe.broker.gateway.enable property,
     // we need to hook in at the last minute and set the property as it won't resolve from the
@@ -226,5 +235,10 @@ public final class TestSimpleCamundaApplication
       final Consumer<BrokerBasedProperties> modifier) {
     modifier.accept(brokerProperties);
     return this;
+  }
+
+  @Override
+  public BrokerBasedProperties brokerConfig() {
+    return brokerProperties;
   }
 }

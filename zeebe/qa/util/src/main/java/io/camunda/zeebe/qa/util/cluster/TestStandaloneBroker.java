@@ -14,6 +14,7 @@ import io.camunda.application.commons.configuration.BrokerBasedConfiguration.Bro
 import io.camunda.application.commons.configuration.WorkingDirectoryConfiguration.WorkingDirectory;
 import io.camunda.application.commons.search.SearchClientDatabaseConfiguration.SearchClientProperties;
 import io.camunda.application.commons.security.CamundaSecurityConfiguration.CamundaSecurityProperties;
+import io.camunda.authentication.config.AuthenticationProperties;
 import io.camunda.client.CamundaClientBuilder;
 import io.camunda.security.configuration.ConfiguredUser;
 import io.camunda.security.configuration.InitializationConfiguration;
@@ -87,6 +88,14 @@ public final class TestStandaloneBroker extends TestSpringApplication<TestStanda
   }
 
   @Override
+  public TestStandaloneBroker withProperty(final String key, final Object value) {
+    // Since the security config is not constructed from the properties, we need to manually update
+    // it when we override a property.
+    AuthenticationProperties.applyToSecurityConfig(securityConfig, key, value);
+    return super.withProperty(key, value);
+  }
+
+  @Override
   protected SpringApplicationBuilder createSpringBuilder() {
     // because @ConditionalOnRestGatewayEnabled relies on the zeebe.broker.gateway.enable property,
     // we need to hook in at the last minute and set the property as it won't resolve from the
@@ -157,6 +166,7 @@ public final class TestStandaloneBroker extends TestSpringApplication<TestStanda
   }
 
   /** Returns the broker configuration */
+  @Override
   public BrokerBasedProperties brokerConfig() {
     return config;
   }
@@ -259,12 +269,11 @@ public final class TestStandaloneBroker extends TestSpringApplication<TestStanda
     withProperty("camunda.database.password", "");
     withProperty("logging.level.io.camunda.db.rdbms", "DEBUG");
     withProperty("logging.level.org.mybatis", "DEBUG");
-    withExporter(
-        "rdbms",
-        cfg -> {
-          cfg.setClassName("-");
-          cfg.setArgs(Map.of("flushInterval", "0"));
-        });
+    withProperty("zeebe.broker.exporters.rdbms.args.flushInterval", "PT0S");
+    withProperty("zeebe.broker.exporters.rdbms.args.defaultHistoryTTL", "PT2S");
+    withProperty("zeebe.broker.exporters.rdbms.args.minHistoryCleanupInterval", "PT2S");
+    withProperty("zeebe.broker.exporters.rdbms.args.maxHistoryCleanupInterval", "PT5S");
+    withExporter("rdbms", cfg -> cfg.setClassName("-"));
     return this;
   }
 }

@@ -11,9 +11,11 @@ import io.camunda.authentication.entity.CamundaUserDTO;
 import io.camunda.authentication.service.CamundaUserService;
 import io.camunda.zeebe.gateway.rest.annotation.CamundaGetMapping;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
 
-@Profile({"auth-basic", "auth-oidc"})
+@Profile("consolidated-auth")
 @CamundaRestController
 @RequestMapping("/v2/authentication")
 public class AuthenticationController {
@@ -24,7 +26,11 @@ public class AuthenticationController {
   }
 
   @CamundaGetMapping(path = "/me")
-  public CamundaUserDTO getCurrentUser() {
-    return camundaUserService.getCurrentUser();
+  public ResponseEntity<CamundaUserDTO> getCurrentUser() {
+    final var authenticatedUser = camundaUserService.getCurrentUser();
+
+    return authenticatedUser == null
+        ? ResponseEntity.status(HttpStatus.UNAUTHORIZED).build()
+        : ResponseEntity.ok(authenticatedUser);
   }
 }

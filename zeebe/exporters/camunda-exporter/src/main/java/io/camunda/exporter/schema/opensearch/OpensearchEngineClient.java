@@ -7,20 +7,21 @@
  */
 package io.camunda.exporter.schema.opensearch;
 
-import static io.camunda.exporter.utils.SearchEngineClientUtils.appendToFileSchemaSettings;
-import static io.camunda.exporter.utils.SearchEngineClientUtils.listIndices;
-import static io.camunda.exporter.utils.SearchEngineClientUtils.mapToSettings;
-
+import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.camunda.exporter.SchemaResourceSerializer;
 import io.camunda.exporter.config.ExporterConfiguration.IndexSettings;
+import io.camunda.exporter.exceptions.ElasticsearchExporterException;
 import io.camunda.exporter.exceptions.IndexSchemaValidationException;
 import io.camunda.exporter.exceptions.OpensearchExporterException;
 import io.camunda.exporter.schema.IndexMapping;
 import io.camunda.exporter.schema.IndexMappingProperty;
 import io.camunda.exporter.schema.MappingSource;
 import io.camunda.exporter.schema.SearchEngineClient;
+import io.camunda.exporter.utils.SearchEngineClientUtils;
 import io.camunda.webapps.schema.descriptors.IndexDescriptor;
 import io.camunda.webapps.schema.descriptors.IndexTemplateDescriptor;
 import io.camunda.webapps.schema.descriptors.operate.index.ImportPositionIndex;
@@ -35,7 +36,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.opensearch.client.json.JsonpDeserializer;
 import org.opensearch.client.json.jackson.JacksonJsonpGenerator;
-import org.opensearch.client.json.jackson.JacksonJsonpMapper;
 import org.opensearch.client.json.jsonb.JsonbJsonpMapper;
 import org.opensearch.client.opensearch.OpenSearchClient;
 import org.opensearch.client.opensearch._types.OpenSearchException;
@@ -50,19 +50,29 @@ import org.opensearch.client.opensearch.indices.PutIndexTemplateRequest;
 import org.opensearch.client.opensearch.indices.PutIndicesSettingsRequest;
 import org.opensearch.client.opensearch.indices.PutMappingRequest;
 import org.opensearch.client.opensearch.indices.get_index_template.IndexTemplateItem;
+import org.opensearch.client.opensearch.indices.get_index_template.IndexTemplateSummary;
 import org.opensearch.client.opensearch.indices.put_index_template.IndexTemplateMapping;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class OpensearchEngineClient implements SearchEngineClient {
   private static final Logger LOG = LoggerFactory.getLogger(OpensearchEngineClient.class);
-  private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final String OPERATE_DELETE_ARCHIVED_POLICY =
       "/schema/opensearch/create/policy/operate_delete_archived_indices.json";
+  private final ObjectReader objectReader;
+  private final ObjectWriter objectWriter;
   private final OpenSearchClient client;
+  private final SearchEngineClientUtils utils;
+  private final ObjectMapper objectMappper;
+  private final SchemaResourceSerializer schemaResourceSerializer;
 
-  public OpensearchEngineClient(final OpenSearchClient client) {
+  public OpensearchEngineClient(final OpenSearchClient client, final ObjectMapper objectMapper) {
     this.client = client;
+    objectMappper = objectMapper;
+    objectReader = objectMapper.reader();
+    objectWriter = objectMapper.writer();
+    utils = new SearchEngineClientUtils(objectMapper);
+    schemaResourceSerializer = new SchemaResourceSerializer(objectMapper);
   }
 
   @Override
@@ -182,7 +192,8 @@ public class OpensearchEngineClient implements SearchEngineClient {
     } catch (final IOException | OpenSearchException e) {
       final var errMsg =
           String.format(
-              "settings PUT failed for the following indices [%s]", listIndices(indexDescriptors));
+              "settings PUT failed for the following indices [%s]",
+              utils.listIndices(indexDescriptors));
       LOG.error(errMsg, e);
       throw new OpensearchExporterException(errMsg, e);
     }
@@ -233,6 +244,29 @@ public class OpensearchEngineClient implements SearchEngineClient {
     }
   }
 
+  /**
+   * Overwrites the settings of the existing index template with the settings block in the
+   * descriptor schema json file.
+   *
+   * @param indexTemplateDescriptor of the index template to have its settings overwritten.
+   */
+  @Override
+  public void updateIndexTemplateSettings(
+      final IndexTemplateDescriptor indexTemplateDescriptor, final IndexSettings currentSettings) {
+    final var updateIndexTemplateSettingsRequest =
+        updateTemplateSettings(indexTemplateDescriptor, currentSettings);
+
+    try {
+      client.indices().putIndexTemplate(updateIndexTemplateSettingsRequest);
+    } catch (final IOException | ElasticsearchException e) {
+      throw new ElasticsearchExporterException(
+          String.format(
+              "Expected to update index template settings '%s' with '%s', but failed ",
+              indexTemplateDescriptor.getTemplateName(), updateIndexTemplateSettingsRequest),
+          e);
+    }
+  }
+
   private SearchRequest allImportPositionDocuments(
       final int partitionId, final List<IndexDescriptor> importPositionIndices) {
     final var importPositionIndicesNames =
@@ -252,7 +286,7 @@ public class OpensearchEngineClient implements SearchEngineClient {
   public Request createIndexStateManagementPolicy(
       final String policyName, final String deletionMinAge) {
     try (final var policyJson = getClass().getResourceAsStream(OPERATE_DELETE_ARCHIVED_POLICY)) {
-      final var jsonMap = MAPPER.readTree(policyJson);
+      final var jsonMap = objectReader.readTree(policyJson);
       final var conditions =
           (ObjectNode)
               jsonMap
@@ -264,7 +298,7 @@ public class OpensearchEngineClient implements SearchEngineClient {
                   .path("conditions");
       conditions.put("min_index_age", deletionMinAge);
 
-      final var policy = MAPPER.writeValueAsBytes(jsonMap);
+      final var policy = objectWriter.writeValueAsBytes(jsonMap);
 
       return Requests.builder()
           .method("PUT")
@@ -282,13 +316,13 @@ public class OpensearchEngineClient implements SearchEngineClient {
       final List<IndexDescriptor> indexDescriptors, final Map<String, String> toAppendSettings) {
 
     final org.opensearch.client.opensearch.indices.IndexSettings settings =
-        mapToSettings(
+        utils.mapToSettings(
             toAppendSettings,
             (inp) ->
                 deserializeJson(
                     org.opensearch.client.opensearch.indices.IndexSettings._DESERIALIZER, inp));
     return new PutIndicesSettingsRequest.Builder()
-        .index(listIndices(indexDescriptors))
+        .index(utils.listIndices(indexDescriptors))
         .settings(settings)
         .build();
   }
@@ -316,10 +350,10 @@ public class OpensearchEngineClient implements SearchEngineClient {
 
   private Map<String, Object> propertyToMap(final Property property) {
     try {
-      return SchemaResourceSerializer.serialize(
+      return schemaResourceSerializer.serialize(
           (JacksonJsonpGenerator::new),
           (jacksonJsonpGenerator) ->
-              property.serialize(jacksonJsonpGenerator, new JacksonJsonpMapper(MAPPER)));
+              property.serialize(jacksonJsonpGenerator, client._transport().jsonpMapper()));
     } catch (final IOException e) {
       throw new OpensearchExporterException(
           String.format("Failed to serialize property [%s]", property.toString()), e);
@@ -357,7 +391,7 @@ public class OpensearchEngineClient implements SearchEngineClient {
 
     final var opensearchProperties =
         newProperties.stream()
-            .map(IndexMappingProperty::toOpensearchProperty)
+            .map(p -> p.toOpensearchProperty(client._transport().jsonpMapper(), objectMappper))
             .collect(Collectors.toMap(Entry::getKey, Entry::getValue));
 
     return new PutMappingRequest.Builder()
@@ -375,7 +409,10 @@ public class OpensearchEngineClient implements SearchEngineClient {
       final var templateFields =
           deserializeJson(
               IndexTemplateMapping._DESERIALIZER,
-              appendToFileSchemaSettings(templateFile, settings));
+              utils.new SchemaSettingsAppender(templateFile)
+                  .withNumberOfShards(settings.getNumberOfShards())
+                  .withNumberOfReplicas(settings.getNumberOfReplicas())
+                  .build());
 
       return new PutIndexTemplateRequest.Builder()
           .name(indexTemplateDescriptor.getTemplateName())
@@ -396,6 +433,58 @@ public class OpensearchEngineClient implements SearchEngineClient {
     }
   }
 
+  private PutIndexTemplateRequest updateTemplateSettings(
+      final IndexTemplateDescriptor indexTemplateDescriptor, final IndexSettings currentSettings) {
+    try (final var templateFile =
+        getClass().getResourceAsStream(indexTemplateDescriptor.getMappingsClasspathFilename())) {
+      final var updatedTemplateSettings =
+          deserializeJson(
+                  IndexTemplateMapping._DESERIALIZER,
+                  utils.new SchemaSettingsAppender(templateFile)
+                      .withNumberOfShards(currentSettings.getNumberOfShards())
+                      .withNumberOfReplicas(currentSettings.getNumberOfReplicas())
+                      .build())
+              .settings();
+
+      final var currentIndexTemplateState = getIndexTemplateState(indexTemplateDescriptor);
+
+      return new PutIndexTemplateRequest.Builder()
+          .name(indexTemplateDescriptor.getTemplateName())
+          .indexPatterns(indexTemplateDescriptor.getIndexPattern())
+          .template(
+              t ->
+                  t.settings(updatedTemplateSettings)
+                      .mappings(currentIndexTemplateState.mappings())
+                      .aliases(currentIndexTemplateState.aliases()))
+          .build();
+
+    } catch (final IOException e) {
+      throw new OpensearchExporterException(
+          "Failed to load file "
+              + indexTemplateDescriptor.getMappingsClasspathFilename()
+              + " from classpath.",
+          e);
+    }
+  }
+
+  private IndexTemplateSummary getIndexTemplateState(
+      final IndexTemplateDescriptor indexTemplateDescriptor) {
+    try {
+      return client
+          .indices()
+          .getIndexTemplate(r -> r.name(indexTemplateDescriptor.getTemplateName()))
+          .indexTemplates()
+          .getFirst()
+          .indexTemplate()
+          .template();
+    } catch (final IOException e) {
+      throw new OpensearchExporterException(
+          String.format(
+              "Failed to retrieve index template '%s'", indexTemplateDescriptor.getTemplateName()),
+          e);
+    }
+  }
+
   private CreateIndexRequest createIndexRequest(
       final IndexDescriptor indexDescriptor, final IndexSettings settings) {
 
@@ -405,7 +494,10 @@ public class OpensearchEngineClient implements SearchEngineClient {
       final var templateFields =
           deserializeJson(
               IndexTemplateMapping._DESERIALIZER,
-              appendToFileSchemaSettings(templateFile, settings));
+              utils.new SchemaSettingsAppender(templateFile)
+                  .withNumberOfShards(settings.getNumberOfShards())
+                  .withNumberOfReplicas(settings.getNumberOfReplicas())
+                  .build());
 
       return new CreateIndexRequest.Builder()
           .index(indexDescriptor.getFullQualifiedName())

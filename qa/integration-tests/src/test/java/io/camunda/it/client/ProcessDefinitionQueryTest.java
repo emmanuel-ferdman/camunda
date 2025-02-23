@@ -8,6 +8,7 @@
 package io.camunda.it.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
 
 import io.camunda.client.CamundaClient;
@@ -15,9 +16,7 @@ import io.camunda.client.api.command.ProblemException;
 import io.camunda.client.api.response.DeploymentEvent;
 import io.camunda.client.api.response.Process;
 import io.camunda.client.api.search.response.ProcessDefinition;
-import io.camunda.qa.util.cluster.TestStandaloneCamunda;
-import io.camunda.zeebe.qa.util.junit.ZeebeIntegration;
-import io.camunda.zeebe.qa.util.junit.ZeebeIntegration.TestZeebe;
+import io.camunda.it.utils.MultiDbTest;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,7 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-@ZeebeIntegration
+@MultiDbTest
 public class ProcessDefinitionQueryTest {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(ProcessDefinitionQueryTest.class);
@@ -38,36 +37,20 @@ public class ProcessDefinitionQueryTest {
 
   private static CamundaClient camundaClient;
 
-  @TestZeebe(initMethod = "initTestStandaloneCamunda")
-  private static TestStandaloneCamunda testStandaloneCamunda;
-
-  static void initTestStandaloneCamunda() {
-    testStandaloneCamunda = new TestStandaloneCamunda().withCamundaExporter();
-  }
-
   @BeforeAll
   public static void beforeAll() throws InterruptedException {
-
-    camundaClient = testStandaloneCamunda.newClientBuilder().build();
-
-    // Deploy form
-    deployResource(String.format("form/%s", "form.form"));
-    deployResource(String.format("form/%s", "form_v2.form"));
+    final List<String> forms = List.of("form.form", "form_v2.form");
+    forms.forEach(form -> deployResource("form/" + form));
 
     final List<String> processes =
         List.of(
             "service_tasks_v1.bpmn",
             "service_tasks_v2.bpmn",
-            "incident_process_v1.bpmn",
-            "manual_process.bpmn",
-            "parent_process_v1.bpmn",
-            "child_process_v1.bpmn",
             "process_start_form.bpmn",
             "processWithVersionTag.bpmn");
+
     processes.forEach(
-        process ->
-            DEPLOYED_PROCESSES.addAll(
-                deployResource(String.format("process/%s", process)).getProcesses()));
+        process -> DEPLOYED_PROCESSES.addAll(deployResource("process/" + process).getProcesses()));
 
     waitForProcessesToBeDeployed();
   }
@@ -294,7 +277,7 @@ public class ProcessDefinitionQueryTest {
         camundaClient.newProcessDefinitionQuery().filter(f -> f.version(version)).send().join();
 
     // then
-    assertThat(result.items().size()).isEqualTo(8);
+    assertThat(result.items().size()).isEqualTo(4);
     assertThat(result.items().getFirst().getVersion()).isEqualTo(version);
   }
 
@@ -326,7 +309,7 @@ public class ProcessDefinitionQueryTest {
         camundaClient.newProcessDefinitionQuery().filter(f -> f.tenantId(tenantId)).send().join();
 
     // then
-    assertThat(result.items().size()).isEqualTo(8);
+    assertThat(result.items().size()).isEqualTo(4);
     assertThat(result.items().getFirst().getTenantId()).isEqualTo(tenantId);
   }
 
@@ -344,7 +327,7 @@ public class ProcessDefinitionQueryTest {
             .join();
 
     // then
-    assertThat(result.items().size()).isEqualTo(8);
+    assertThat(result.items().size()).isEqualTo(4);
     assertThat(result.items().getFirst().getVersionTag()).isEqualTo(versionTag);
   }
 
@@ -384,7 +367,7 @@ public class ProcessDefinitionQueryTest {
             .join();
 
     // then
-    assertThat(result.items().size()).isEqualTo(8);
+    assertThat(result.items().size()).isEqualTo(4);
     assertThat(result.items().stream().map(ProcessDefinition::getProcessDefinitionId).toList())
         .containsExactlyElementsOf(expectedProcessDefinitionIds);
   }
@@ -535,7 +518,7 @@ public class ProcessDefinitionQueryTest {
             .send()
             .join();
 
-    assertThat(resultAfter.items().size()).isEqualTo(7);
+    assertThat(resultAfter.items().size()).isEqualTo(3);
     final var keyAfter = resultAfter.items().getFirst().getProcessDefinitionKey();
     // apply searchBefore
     final var resultBefore =
@@ -577,7 +560,7 @@ public class ProcessDefinitionQueryTest {
 
   private static void waitForProcessesToBeDeployed() throws InterruptedException {
     Awaitility.await("should deploy processes and import in Operate")
-        .atMost(Duration.ofMinutes(3))
+        .atMost(Duration.ofMinutes(5))
         .ignoreExceptions() // Ignore exceptions and continue retrying
         .untilAsserted(
             () -> {
@@ -601,6 +584,7 @@ public class ProcessDefinitionQueryTest {
                       .join();
 
               assertThat(resultForm.getFormId().equals("test"));
+              assertEquals(2L, resultForm.getVersion());
             });
   }
 }

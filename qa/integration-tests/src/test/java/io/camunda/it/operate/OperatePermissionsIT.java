@@ -8,17 +8,18 @@
 package io.camunda.it.operate;
 
 import static io.camunda.client.protocol.rest.PermissionTypeEnum.READ_PROCESS_DEFINITION;
+import static io.camunda.client.protocol.rest.PermissionTypeEnum.READ_PROCESS_INSTANCE;
 import static io.camunda.client.protocol.rest.ResourceTypeEnum.PROCESS_DEFINITION;
 import static io.camunda.it.client.QueryTest.deployResource;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.HttpStatus.FORBIDDEN;
 import static org.springframework.http.HttpStatus.OK;
 
-import io.camunda.application.Profile;
 import io.camunda.client.CamundaClient;
 import io.camunda.client.api.response.Process;
 import io.camunda.qa.util.cluster.TestRestOperateClient;
 import io.camunda.qa.util.cluster.TestStandaloneCamunda;
+import io.camunda.security.entity.AuthenticationMethod;
 import io.camunda.zeebe.it.util.AuthorizationsUtil;
 import io.camunda.zeebe.it.util.AuthorizationsUtil.Permissions;
 import io.camunda.zeebe.qa.util.junit.ZeebeIntegration;
@@ -29,11 +30,9 @@ import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AutoClose;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 @ZeebeIntegration
-@Disabled("https://github.com/camunda/camunda/issues/27289")
 public class OperatePermissionsIT {
 
   private static final String SUPER_USER = "super";
@@ -54,8 +53,8 @@ public class OperatePermissionsIT {
     testInstance =
         new TestStandaloneCamunda()
             .withCamundaExporter()
-            .withAdditionalProfile(Profile.AUTH_BASIC)
-            .withAuthorizationsEnabled();
+            .withSecurityConfig(c -> c.getAuthorizations().setEnabled(true))
+            .withAuthenticationMethod(AuthenticationMethod.BASIC);
   }
 
   @BeforeAll
@@ -68,14 +67,15 @@ public class OperatePermissionsIT {
         authorizationsUtil.createUserAndClient(
             SUPER_USER,
             "password",
-            new Permissions(PROCESS_DEFINITION, READ_PROCESS_DEFINITION, List.of("*")));
+            new Permissions(PROCESS_DEFINITION, READ_PROCESS_DEFINITION, List.of("*")),
+            new Permissions(PROCESS_DEFINITION, READ_PROCESS_INSTANCE, List.of("*")));
     superOperateClient = testInstance.newOperateClient(SUPER_USER, "password");
     // create restricted user that can only read process definition 1
     authorizationsUtil.createUserWithPermissions(
         RESTRICTED_USER,
         "password",
         new Permissions(
-            PROCESS_DEFINITION, READ_PROCESS_DEFINITION, List.of(PROCESS_DEFINITION_ID_1)));
+            PROCESS_DEFINITION, READ_PROCESS_INSTANCE, List.of(PROCESS_DEFINITION_ID_1)));
     restrictedOperateClient = testInstance.newOperateClient(RESTRICTED_USER, "password");
 
     final List<String> processes = List.of(PROCESS_DEFINITION_ID_1, PROCESS_DEFINITION_ID_2);

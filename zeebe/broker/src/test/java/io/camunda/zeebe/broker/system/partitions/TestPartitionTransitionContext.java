@@ -44,11 +44,16 @@ import io.camunda.zeebe.stream.api.StreamClock.ControllableStreamClock;
 import io.camunda.zeebe.stream.impl.StreamProcessor;
 import io.camunda.zeebe.transport.impl.AtomixServerTransport;
 import io.camunda.zeebe.util.health.HealthMonitor;
+import io.camunda.zeebe.util.micrometer.MicrometerUtil;
+import io.camunda.zeebe.util.micrometer.MicrometerUtil.PartitionKeyNames;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Collection;
 import java.util.List;
 
 public class TestPartitionTransitionContext implements PartitionTransitionContext {
+
+  private final SimpleMeterRegistry startupMeterRegistry = new SimpleMeterRegistry();
 
   private RaftPartition raftPartition;
   private Role currentRole;
@@ -77,6 +82,11 @@ public class TestPartitionTransitionContext implements PartitionTransitionContex
   private DynamicPartitionConfig partitionConfig;
   private ControllableStreamClock clock;
   private SecurityConfiguration securityConfig;
+  private MeterRegistry transitionMeterRegistry;
+
+  public TestPartitionTransitionContext() {
+    transitionMeterRegistry = MicrometerUtil.wrap(startupMeterRegistry, PartitionKeyNames.tags(1));
+  }
 
   @Override
   public int getPartitionId() {
@@ -315,17 +325,19 @@ public class TestPartitionTransitionContext implements PartitionTransitionContex
   }
 
   @Override
-  public MeterRegistry getBrokerMeterRegistry() {
-    return null;
+  public MeterRegistry getPartitionStartupMeterRegistry() {
+    return startupMeterRegistry;
   }
 
   @Override
-  public MeterRegistry getPartitionMeterRegistry() {
-    return null;
+  public MeterRegistry getPartitionTransitionMeterRegistry() {
+    return transitionMeterRegistry;
   }
 
   @Override
-  public void setPartitionMeterRegistry(final MeterRegistry partitionMeterRegistry) {}
+  public void setPartitionTransitionMeterRegistry(final MeterRegistry transitionMeterRegistry) {
+    this.transitionMeterRegistry = transitionMeterRegistry;
+  }
 
   public void setGatewayBrokerTransport(final AtomixServerTransport gatewayBrokerTransport) {
     this.gatewayBrokerTransport = gatewayBrokerTransport;

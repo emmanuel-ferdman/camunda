@@ -15,9 +15,11 @@ import io.atomix.utils.net.Address;
 import io.camunda.client.CamundaClient;
 import io.camunda.client.api.command.ClientStatusException;
 import io.camunda.client.api.response.DeploymentEvent;
-import io.camunda.security.configuration.SecurityConfiguration;
+import io.camunda.security.configuration.SecurityConfigurations;
 import io.camunda.service.UserServices;
 import io.camunda.zeebe.broker.client.api.BrokerClient;
+import io.camunda.zeebe.broker.client.api.BrokerClientRequestMetrics;
+import io.camunda.zeebe.broker.client.api.BrokerClientTopologyMetrics;
 import io.camunda.zeebe.broker.client.impl.BrokerClientImpl;
 import io.camunda.zeebe.broker.client.impl.BrokerTopologyManagerImpl;
 import io.camunda.zeebe.gateway.Gateway;
@@ -31,12 +33,15 @@ import io.camunda.zeebe.scheduler.ActorScheduler;
 import io.camunda.zeebe.scheduler.future.ActorFuture;
 import io.camunda.zeebe.test.util.socket.SocketUtil;
 import io.grpc.StatusRuntimeException;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.netty.util.NetUtil;
 import java.time.Duration;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import org.agrona.CloseHelper;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.AutoClose;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -44,7 +49,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 final class InterceptorIT {
 
   private final GatewayCfg config = new GatewayCfg();
-  private final SecurityConfiguration securityConfiguration = new SecurityConfiguration();
   private final ActorScheduler scheduler =
       ActorScheduler.newActorScheduler()
           .setCpuBoundActorThreadCount(1)
@@ -56,6 +60,7 @@ final class InterceptorIT {
   private JobStreamClient jobStreamClient;
   private Gateway gateway;
   private BrokerTopologyManagerImpl topologyManager;
+  @AutoClose private MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
   @BeforeEach
   void beforeEach() {
@@ -70,11 +75,13 @@ final class InterceptorIT {
     config.init();
 
     cluster =
-        AtomixCluster.builder()
+        AtomixCluster.builder(meterRegistry)
             .withAddress(Address.from(clusterAddress.getHostName(), clusterAddress.getPort()))
             .build();
     topologyManager =
-        new BrokerTopologyManagerImpl(() -> cluster.getMembershipService().getMembers());
+        new BrokerTopologyManagerImpl(
+            () -> cluster.getMembershipService().getMembers(),
+            new BrokerClientTopologyMetrics(new SimpleMeterRegistry()));
     cluster.getMembershipService().addListener(topologyManager);
 
     brokerClient =
@@ -83,18 +90,20 @@ final class InterceptorIT {
             cluster.getMessagingService(),
             cluster.getEventService(),
             scheduler,
-            topologyManager);
+            topologyManager,
+            new BrokerClientRequestMetrics(new SimpleMeterRegistry()));
 
     jobStreamClient = new JobStreamClientImpl(scheduler, cluster.getCommunicationService());
     gateway =
         new Gateway(
             config,
-            securityConfiguration,
+            SecurityConfigurations.unauthenticated(),
             brokerClient,
             scheduler,
             jobStreamClient.streamer(),
             mock(UserServices.class),
-            mock(PasswordEncoder.class));
+            mock(PasswordEncoder.class),
+            new SimpleMeterRegistry());
 
     cluster.start().join();
     scheduler.start();

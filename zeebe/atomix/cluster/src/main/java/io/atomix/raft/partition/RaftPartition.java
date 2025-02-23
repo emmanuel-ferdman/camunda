@@ -32,6 +32,7 @@ import io.camunda.zeebe.util.VisibleForTesting;
 import io.camunda.zeebe.util.health.FailureListener;
 import io.camunda.zeebe.util.health.HealthMonitorable;
 import io.camunda.zeebe.util.health.HealthReport;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.io.File;
 import java.util.Collection;
 import java.util.Collections;
@@ -51,6 +52,7 @@ public final class RaftPartition implements Partition, HealthMonitorable {
   private final PartitionId partitionId;
   private final RaftPartitionConfig config;
   private final File dataDirectory;
+  private final MeterRegistry meterRegistry;
   private final Set<RaftRoleChangeListener> deferredRoleChangeListeners =
       new CopyOnWriteArraySet<>();
   private final PartitionMetadata partitionMetadata;
@@ -59,11 +61,13 @@ public final class RaftPartition implements Partition, HealthMonitorable {
   public RaftPartition(
       final PartitionMetadata partitionMetadata,
       final RaftPartitionConfig config,
-      final File dataDirectory) {
+      final File dataDirectory,
+      final MeterRegistry meterRegistry) {
     partitionId = partitionMetadata.id();
     this.partitionMetadata = partitionMetadata;
     this.config = config;
     this.dataDirectory = dataDirectory;
+    this.meterRegistry = meterRegistry;
   }
 
   public void addRoleChangeListener(final RaftRoleChangeListener listener) {
@@ -134,7 +138,8 @@ public final class RaftPartition implements Partition, HealthMonitorable {
         managementService.getMembershipService(),
         managementService.getMessagingService(),
         snapshotStore,
-        partitionMetadata);
+        partitionMetadata,
+        meterRegistry);
   }
 
   /**
@@ -234,6 +239,10 @@ public final class RaftPartition implements Partition, HealthMonitorable {
 
   public RaftPartitionServer getServer() {
     return server;
+  }
+
+  public MeterRegistry getMeterRegistry() {
+    return meterRegistry;
   }
 
   public CompletableFuture<Void> stepDown() {

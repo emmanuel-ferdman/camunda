@@ -10,9 +10,13 @@ package io.camunda.security.configuration;
 import io.camunda.security.entity.AuthenticationMethod;
 
 public class AuthenticationConfiguration {
+  public static final AuthenticationMethod DEFAULT_METHOD = AuthenticationMethod.BASIC;
 
-  private AuthenticationMethod method = AuthenticationMethod.NONE;
-  private BasicAuthenticationConfiguration basicAuthenticationConfiguration;
+  private AuthenticationMethod method = DEFAULT_METHOD;
+  private BasicAuthenticationConfiguration basicAuthenticationConfiguration =
+      new BasicAuthenticationConfiguration();
+  private OidcAuthenticationConfiguration oidcAuthenticationConfiguration =
+      new OidcAuthenticationConfiguration();
 
   public AuthenticationMethod getMethod() {
     return method;
@@ -28,5 +32,13 @@ public class AuthenticationConfiguration {
 
   public void setBasic(final BasicAuthenticationConfiguration configuration) {
     basicAuthenticationConfiguration = configuration;
+  }
+
+  public OidcAuthenticationConfiguration getOidc() {
+    return oidcAuthenticationConfiguration;
+  }
+
+  public void setOidc(final OidcAuthenticationConfiguration configuration) {
+    oidcAuthenticationConfiguration = configuration;
   }
 }

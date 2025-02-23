@@ -207,7 +207,7 @@ public final class BackgroundTaskManagerFactory {
         yield new ElasticsearchArchiverRepository(
             partitionId,
             config.getArchiver(),
-            config.getRetention(),
+            config.getArchiver().getRetention(),
             config.getConnect().getIndexPrefix(),
             listViewTemplate.getFullQualifiedName(),
             batchOperationTemplate.getFullQualifiedName(),
@@ -221,7 +221,7 @@ public final class BackgroundTaskManagerFactory {
         yield new OpenSearchArchiverRepository(
             partitionId,
             config.getArchiver(),
-            config.getRetention(),
+            config.getArchiver().getRetention(),
             config.getConnect().getIndexPrefix(),
             listViewTemplate.getFullQualifiedName(),
             batchOperationTemplate.getFullQualifiedName(),
@@ -253,6 +253,7 @@ public final class BackgroundTaskManagerFactory {
             postImporterTemplate.getAlias(),
             incidentTemplate.getAlias(),
             listViewTemplate.getAlias(),
+            listViewTemplate.getFullQualifiedName(),
             flowNodeTemplate.getAlias(),
             operationTemplate.getAlias(),
             connector.createAsyncClient(),
@@ -266,6 +267,7 @@ public final class BackgroundTaskManagerFactory {
             postImporterTemplate.getAlias(),
             incidentTemplate.getAlias(),
             listViewTemplate.getAlias(),
+            listViewTemplate.getFullQualifiedName(),
             flowNodeTemplate.getAlias(),
             operationTemplate.getAlias(),
             connector.createAsyncClient(),

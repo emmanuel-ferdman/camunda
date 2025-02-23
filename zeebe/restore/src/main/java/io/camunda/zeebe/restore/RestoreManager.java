@@ -8,6 +8,7 @@
 package io.camunda.zeebe.restore;
 
 import io.atomix.cluster.MemberId;
+import io.atomix.primitive.partition.PartitionMetadata;
 import io.atomix.raft.partition.RaftPartition;
 import io.camunda.zeebe.backup.api.BackupDescriptor;
 import io.camunda.zeebe.backup.api.BackupStatus;
@@ -19,6 +20,10 @@ import io.camunda.zeebe.broker.system.configuration.BrokerCfg;
 import io.camunda.zeebe.db.impl.rocksdb.ChecksumProviderRocksDBImpl;
 import io.camunda.zeebe.restore.PartitionRestoreService.BackupValidator;
 import io.camunda.zeebe.util.FileUtil;
+import io.camunda.zeebe.util.micrometer.MicrometerUtil;
+import io.camunda.zeebe.util.micrometer.MicrometerUtil.PartitionKeyNames;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.composite.CompositeMeterRegistry;
 import java.io.IOException;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.Path;
@@ -32,10 +37,15 @@ public class RestoreManager {
   private static final Logger LOG = LoggerFactory.getLogger(RestoreManager.class);
   private final BrokerCfg configuration;
   private final BackupStore backupStore;
+  private final MeterRegistry meterRegistry;
 
-  public RestoreManager(final BrokerCfg configuration, final BackupStore backupStore) {
+  public RestoreManager(
+      final BrokerCfg configuration,
+      final BackupStore backupStore,
+      final MeterRegistry meterRegistry) {
     this.configuration = configuration;
     this.backupStore = backupStore;
+    this.meterRegistry = meterRegistry;
   }
 
   public CompletableFuture<Void> restore(final long backupId, final boolean validateConfig) {
@@ -54,7 +64,7 @@ public class RestoreManager {
 
     final var partitionToRestore = collectPartitions();
 
-    final var partitionIds = partitionToRestore.stream().map(p -> p.id().id()).toList();
+    final var partitionIds = partitionToRestore.stream().map(p -> p.partition().id().id()).toList();
     LOG.info("Restoring partitions {}", partitionIds);
 
     return CompletableFuture.allOf(
@@ -86,24 +96,32 @@ public class RestoreManager {
   }
 
   private CompletableFuture<Void> restorePartition(
-      final RaftPartition partition, final long backupId, final boolean validateConfig) {
+      final InstrumentedRaftPartition partition,
+      final long backupId,
+      final boolean validateConfig) {
     final BackupValidator validator;
+    final RaftPartition raftPartition = partition.partition();
+
     if (validateConfig) {
       validator = new ValidatePartitionCount(configuration.getCluster().getPartitionsCount());
     } else {
       LOG.warn("Restoring without validating backup");
       validator = BackupValidator.none();
     }
+
+    final var registry = partition.registry();
     return new PartitionRestoreService(
             backupStore,
-            partition,
+            partition.partition(),
             configuration.getCluster().getNodeId(),
-            new ChecksumProviderRocksDBImpl())
+            new ChecksumProviderRocksDBImpl(),
+            partition.registry())
         .restore(backupId, validator)
-        .thenAccept(backup -> logSuccessfulRestore(backup, partition.id().id(), backupId));
+        .thenAccept(backup -> logSuccessfulRestore(backup, raftPartition.id().id(), backupId))
+        .whenComplete((ok, error) -> MicrometerUtil.close(registry));
   }
 
-  private Set<RaftPartition> collectPartitions() {
+  private Set<InstrumentedRaftPartition> collectPartitions() {
     final var localBrokerId = configuration.getCluster().getNodeId();
     final var localMember = MemberId.from(String.valueOf(localBrokerId));
     final var clusterTopology =
@@ -114,8 +132,18 @@ public class RestoreManager {
 
     return clusterTopology.partitions().stream()
         .filter(partitionMetadata -> partitionMetadata.members().contains(localMember))
-        .map(raftPartitionFactory::createRaftPartition)
+        .map(metadata -> createRaftPartition(metadata, raftPartitionFactory))
         .collect(Collectors.toSet());
+  }
+
+  private InstrumentedRaftPartition createRaftPartition(
+      final PartitionMetadata metadata, final RaftPartitionFactory factory) {
+    final var partitionId = metadata.id().id();
+    final var partitionRegistry =
+        MicrometerUtil.wrap(meterRegistry, PartitionKeyNames.tags(partitionId));
+
+    return new InstrumentedRaftPartition(
+        factory.createRaftPartition(metadata, partitionRegistry), partitionRegistry);
   }
 
   static final class ValidatePartitionCount implements BackupValidator {
@@ -141,4 +169,7 @@ public class RestoreManager {
       return status;
     }
   }
+
+  private record InstrumentedRaftPartition(
+      RaftPartition partition, CompositeMeterRegistry registry) {}
 }

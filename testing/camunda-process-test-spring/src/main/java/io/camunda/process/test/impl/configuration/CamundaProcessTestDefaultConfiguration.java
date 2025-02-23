@@ -15,21 +15,28 @@
  */
 package io.camunda.process.test.impl.configuration;
 
-import static io.camunda.zeebe.spring.client.configuration.CamundaAutoConfiguration.DEFAULT_OBJECT_MAPPER;
+import static io.camunda.spring.client.configuration.CamundaAutoConfiguration.DEFAULT_OBJECT_MAPPER;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.camunda.client.api.JsonMapper;
 import io.camunda.client.impl.CamundaObjectMapper;
+import io.camunda.zeebe.client.impl.ZeebeObjectMapper;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 
 /** Fallback values if certain beans are missing */
 public class CamundaProcessTestDefaultConfiguration {
 
+  @Bean(name = "camundaJsonMapper")
+  @ConditionalOnMissingBean
+  public JsonMapper camundaJsonMapper(final ObjectMapper objectMapper) {
+    return new CamundaObjectMapper(objectMapper);
+  }
+
   @Bean(name = "zeebeJsonMapper")
   @ConditionalOnMissingBean
-  public JsonMapper jsonMapper(final ObjectMapper objectMapper) {
-    return new CamundaObjectMapper(objectMapper);
+  public io.camunda.zeebe.client.api.JsonMapper zeebeJsonMapper(final ObjectMapper objectMapper) {
+    return new ZeebeObjectMapper(objectMapper);
   }
 
   @Bean
